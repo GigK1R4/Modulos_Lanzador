@@ -524,7 +524,7 @@ class LauncherApp(ctk.CTk):
                 self.config["sheet_url"] = DEFAULT_CONFIG["sheet_url"]
                 self.auth_service = SheetAuth(self.config)
 
-            success, modules_allowed, message = self.auth_service.authenticate(user, pwd)
+            success, modules_allowed, message = self.auth_service.autenticar(user, pwd)
             if success:
                 save_session(user, remembered=self.remember_var.get())
                 self.after(0, lambda: self._on_auth_success(user, modules_allowed))

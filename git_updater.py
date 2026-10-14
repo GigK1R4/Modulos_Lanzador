@@ -40,10 +40,14 @@ class GitUpdater:
             self.storage_dir = get_app_data_dir()
             self.modules_dir = os.path.join(self.storage_dir, modules_dir_name)
         else:
-            # En desarrollo, comprobar si existe localmente o usar AppData
+            # En ejecución como script .py:
             local_base = base_dir or os.path.dirname(os.path.abspath(__file__))
             local_mods = os.path.join(local_base, modules_dir_name)
-            if os.path.isdir(local_mods):
+            if self.is_git_repo(local_base):
+                # Si la carpeta actual es un repositorio Git, actualizar este directorio directamente
+                self.storage_dir = local_base
+                self.modules_dir = local_base
+            elif os.path.isdir(local_mods):
                 self.storage_dir = local_base
                 self.modules_dir = local_mods
             else:

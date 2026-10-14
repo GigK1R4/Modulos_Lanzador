@@ -1,0 +1,19 @@
+# =============================================================================
+# DEPENDENCIAS DEL LANZADOR MODULAR Y SUS MÓDULOS
+# Instalar con: pip install -r requirements.txt
+# =============================================================================
+
+customtkinter>=5.2.0
+pillow>=10.0.0
+requests>=2.28.0
+
+# Dependencias para PDF_Unir.py
+pypdf>=3.9.0
+reportlab>=3.6.0
+
+# Dependencias para Gene_Documentos.py
+pandas>=2.0.0
+openpyxl>=3.1.0
+docxtpl>=0.16.0
+python-docx>=0.8.11
+pywin32>=306; sys_platform == 'win32'

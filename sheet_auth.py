@@ -176,3 +176,7 @@ class SheetAuth:
         if self.api_url:
             return self.autenticar_via_api(username, password)
         return self.autenticar_via_csv(username, password)
+
+    # Alias para compatibilidad con llamadas en inglés
+    authenticate = autenticar
+
