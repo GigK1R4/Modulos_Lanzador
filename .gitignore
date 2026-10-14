@@ -1,0 +1,35 @@
+# =============================================================================
+# GITIGNORE - LANZADOR AUTOMATIZACIÓN DE ARCHIVOS
+# =============================================================================
+
+# PyInstaller y compilaciones
+build/
+dist/
+*.spec
+
+# Caché de Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.pyd
+*.pyo
+
+# Entornos virtuales
+.venv/
+env/
+venv/
+ENV/
+
+# Archivos de sesión y temporales en tiempo de ejecución
+session.json
+assets/
+*.log
+
+# Configuraciones locales de IDE
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Repositorio externo de módulos (se sincroniza automáticamente desde GitHub)
+Modulos_Lanzador/

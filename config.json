@@ -1,0 +1,44 @@
+{
+  "app_title": "AUTOMATIZACIÓN DE ARCHIVOS",
+  "app_subtitle": "Seleccione una opción para continuar",
+  "sheet_url": "https://docs.google.com/spreadsheets/d/1v5u7tBZ9x_Ple_r_Maf2x3U8R4r4XMB0YJ-tu68X5jc/edit?usp=sharing/edit",
+  "sheet_name": "Usuarios",
+  "apps_script_url": "",
+  "modules_repo_url": "https://github.com/GigK1R4/Modulos_Lanzador.git",
+  "modules_dir": "Modulos_Lanzador",
+  "auto_git_update": true,
+  "auto_discover_modules": true,
+  "network_timeout": 8,
+  "modules": [
+    {
+      "id": "pdf_unir",
+      "name": "PDF Unir",
+      "title": "UNIR\nPDF",
+      "script": "PDF_Unir.py",
+      "description": "Unificación y generación de certificados PDF",
+      "enabled_by_default": false
+    },
+    {
+      "id": "gene_documentos",
+      "name": "Gene Documentos",
+      "title": "DOCUMENTOS\nMASIVOS",
+      "script": "Gene_Documentos.py",
+      "description": "Generación masiva de plantillas Word y conversión a PDF",
+      "enabled_by_default": false
+    }
+  ],
+  "theme": {
+    "window_bg": "#0b1626",
+    "card_bg": "#f8fafc",
+    "card_text": "#02293f",
+    "card_border": "#ffffff",
+    "card_active_border": "#00bcd4",
+    "card_disabled_bg": "#152438",
+    "card_disabled_text": "#506982",
+    "badge_bg": "#0e223d",
+    "badge_border": "#1b3a5f",
+    "badge_dot": "#00b4d8",
+    "badge_text": "#38bdf8",
+    "font_family": "Segoe UI"
+  }
+}
