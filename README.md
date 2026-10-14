@@ -32,7 +32,7 @@ Sistema modular de automatización de archivos con interfaz moderna (**CustomTki
 ### Opción 2: Modo Desarrollador (Python)
 1. Clona el repositorio:
    ```bash
-   git clone https://github.com/GigK1R4/Lanzador_Modulos.git
+   git clone https://github.com/GigK1R4/Modulos_Lanzador.git
    ```
 2. Instala las dependencias:
    ```bash

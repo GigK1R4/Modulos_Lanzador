@@ -74,7 +74,7 @@ El archivo [`config.json`](file:///d:/CR-SISTEMAS-99o/Documents/ProgramasAntig/L
   "sheet_url": "https://docs.google.com/spreadsheets/d/1v5u7tBZ9x_Ple_r_Maf2x3U8R4r4XMB0YJ-tu68X5jc/edit?usp=sharing/edit",
   "sheet_name": "Usuarios",
   "apps_script_url": "",
-  "modules_repo_url": "https://github.com/GigK1R4/Lanzador_Modulos.git",
+  "modules_repo_url": "https://github.com/GigK1R4/Modulos_Lanzador.git",
   "modules_dir": "Modulos_Lanzador",
   "auto_git_update": true,
   "auto_discover_modules": true
@@ -86,14 +86,14 @@ El archivo [`config.json`](file:///d:/CR-SISTEMAS-99o/Documents/ProgramasAntig/L
 ## 🔄 PASO 3: Sincronización Automática con GitHub (Zero Carpetas Locales)
 
 1. **Al iniciar el programa:**
-   - Se conecta automáticamente a GitHub (`https://github.com/GigK1R4/Lanzador_Modulos.git`) para buscar actualizaciones de los módulos.
+   - Se conecta automáticamente a GitHub (`https://github.com/GigK1R4/Modulos_Lanzador.git`) para buscar actualizaciones de los módulos.
    - **Funciona en cualquier PC:** Si el equipo tiene Git instalado, utiliza `git fetch/pull`. Si no tiene Git instalado, descarga los módulos directamente vía HTTP/Zipball desde GitHub.
    - **Cero desorden:** Toda la información de módulos y credenciales se almacena en el directorio seguro del sistema (`%LOCALAPPDATA%\LanzadorApp`). **No se crea ninguna carpeta ni archivo en el escritorio o donde se ubique el ejecutable**.
    - Los iconos se generan 100% en memoria RAM (no se crea carpeta `assets`).
 2. **Botón `⟳ Sincronizar Git`:**
    - Ubicado en la barra inferior derecha. Permite refrescar y descargar al instante cualquier script nuevo o cambio subido a GitHub sin reiniciar.
 3. **Añadir o modificar módulos:**
-   - Simplemente sube cualquier archivo `.py` nuevo a tu repositorio `https://github.com/GigK1R4/Lanzador_Modulos.git`.
+   - Simplemente sube cualquier archivo `.py` nuevo a tu repositorio `https://github.com/GigK1R4/Modulos_Lanzador.git`.
    - Cuando cualquier usuario abra su `Lanzador.exe` en cualquier PC, se descargará automáticamente y aparecerá en su pantalla.
 
 ---
@@ -121,6 +121,6 @@ git init
 git add .
 git commit -m "Lanzador modular con sincronización automática y ejecución portable"
 git branch -M main
-git remote add origin https://github.com/GigK1R4/Lanzador_Modulos.git
+git remote add origin https://github.com/TU_USUARIO/TU_REPOSITORIO.git
 git push -u origin main
 ```
