@@ -50,7 +50,7 @@ class GitUpdater:
                 self.storage_dir = get_app_data_dir()
                 self.modules_dir = os.path.join(self.storage_dir, modules_dir_name)
 
-        self.repo_url = repo_url or "https://github.com/GigK1R4/Modulos_Lanzador.git"
+        self.repo_url = repo_url or "https://github.com/GigK1R4/Lanzador_Modulos.git"
         self.commit_cache_file = os.path.join(self.storage_dir, "last_commit.json")
         os.makedirs(self.modules_dir, exist_ok=True)
 
@@ -108,7 +108,7 @@ class GitUpdater:
             branches = ["main", "master"]
             zip_content = None
             for branch in branches:
-                zip_url = f"https://github.com/GigK1R4/Modulos_Lanzador/archive/refs/heads/{branch}.zip"
+                zip_url = f"https://github.com/GigK1R4/Lanzador_Modulos/archive/refs/heads/{branch}.zip"
                 try:
                     resp = requests.get(zip_url, timeout=20)
                     if resp.status_code == 200:
@@ -142,10 +142,10 @@ class GitUpdater:
         """Consulta si hay nuevos commits en GitHub a través de su API pública"""
         try:
             import requests
-            api_url = "https://api.github.com/repos/GigK1R4/Modulos_Lanzador/commits/main"
+            api_url = "https://api.github.com/repos/GigK1R4/Lanzador_Modulos/commits/main"
             resp = requests.get(api_url, timeout=10)
             if resp.status_code != 200:
-                api_url = "https://api.github.com/repos/GigK1R4/Modulos_Lanzador/commits/master"
+                api_url = "https://api.github.com/repos/GigK1R4/Lanzador_Modulos/commits/master"
                 resp = requests.get(api_url, timeout=10)
 
             if resp.status_code == 200:

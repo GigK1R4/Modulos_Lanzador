@@ -48,7 +48,7 @@ DEFAULT_CONFIG = {
     "sheet_url": "https://docs.google.com/spreadsheets/d/1v5u7tBZ9x_Ple_r_Maf2x3U8R4r4XMB0YJ-tu68X5jc/edit?usp=sharing/edit",
     "sheet_name": "Usuarios",
     "apps_script_url": "",
-    "modules_repo_url": "https://github.com/GigK1R4/Modulos_Lanzador.git",
+    "modules_repo_url": "https://github.com/GigK1R4/Lanzador_Modulos.git",
     "modules_dir": "Modulos_Lanzador",
     "auto_git_update": True,
     "auto_discover_modules": True,
