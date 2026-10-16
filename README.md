@@ -9,7 +9,7 @@ Sistema modular de automatización de archivos con interfaz moderna (**CustomTki
 - **Ejecución 100% Portable (Zero Clutter):** El ejecutable `Lanzador.exe` se puede ejecutar desde cualquier carpeta, Escritorio o memoria USB sin crear archivos ni carpetas adicionales en la máquina del usuario.
 - **Sincronización Automática con GitHub:** Cada vez que se abre el lanzador, consulta este repositorio para descargar nuevos módulos o actualizaciones. Funciona incluso en computadores que no tienen Git instalado (descarga directa vía HTTP).
 - **Ventana Única Integrada:** Los módulos no se abren en ventanas emergentes externas, sino que se integran y adaptan suavemente dentro de la misma ventana principal.
-- **Control de Permisos Dinámico:** Consulta en tiempo real las credenciales y los permisos asignados a cada usuario desde una hoja de Google Sheets.
+- **Control de Permisos Seguro (Zero Exposición):** Autenticación mediante Google Apps Script Web App. La hoja de cálculo permanece 100% privada en Google Drive del administrador y los usuarios solo reciben su validación y módulos asignados.
 - **Iconos en Memoria:** Los gráficos vectoriales de los módulos se renderizan directamente en la memoria RAM con Pillow.
 
 ---
@@ -49,7 +49,7 @@ Sistema modular de automatización de archivos con interfaz moderna (**CustomTki
 
 - **GUI:** [CustomTkinter](https://customtkinter.tomschimansky.com/) (Tema oscuro minimalista)
 - **Gráficos:** Pillow (PIL)
-- **Autenticación:** Google Sheets CSV API & Google Apps Script
+- **Autenticación:** Google Apps Script Web App (API REST HTTPS con base privada)
 - **Sincronización:** Git CLI + GitHub REST API (Fallback HTTP)
 
 ---

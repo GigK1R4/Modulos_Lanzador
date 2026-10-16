@@ -1,29 +1,55 @@
 /**
- * API Backend en Google Apps Script para el Lanzador de Automatización de Archivos
+ * =============================================================================
+ * BACKEND SEGURO EN GOOGLE APPS SCRIPT PARA EL LANZADOR
+ * =============================================================================
  * 
- * Permite autenticar usuarios y obtener sus módulos asignados desde una pestaña 'Usuarios'.
+ * Este script actúa como intermediario seguro (API Web App) entre el Lanzador
+ * de escritorio y la hoja de cálculo de Google Sheets.
  * 
- * Instrucciones de instalación:
- * 1. En tu hoja de cálculo de Google Sheets, ve a Extensiones > Apps Script.
- * 2. Pega este código.
- * 3. Haz clic en Desplegar > Nuevo despliegue > Tipo: "Aplicación web".
- * 4. Configura:
- *    - Ejecutar como: "Yo"
- *    - Quién tiene acceso: "Cualquier persona" (Anyone)
- * 5. Copia la URL del despliegue y pégala en `apps_script_url` dentro de config.json.
+ * 🔒 VENTAJA DE SEGURIDAD:
+ * - La hoja de Google Sheets permanece 100% PRIVADA (Acceso restringido).
+ * - Los usuarios finales NO tienen acceso a la hoja ni a Google Drive.
+ * - El cliente (Lanzador.py) nunca descarga la hoja ni ve los datos de otros usuarios.
+ * - El cliente envía únicamente usuario y contraseña por POST (HTTPS).
+ * - Este script valida credenciales (en texto plano o con hash SHA-256) y responde
+ *   únicamente con true/false, los módulos asignados y un token temporal.
+ * 
+ * 📋 INSTRUCCIONES DE DESPLIEGUE:
+ * 1. Abre tu hoja de Google Sheets privada.
+ * 2. Ve al menú superior: Extensiones > Apps Script.
+ * 3. Borra el código existente y pega TODO el contenido de este archivo.
+ * 4. Haz clic en el icono de Guardar (disquete).
+ * 5. Arriba a la derecha, haz clic en "Implementar" (o "Deploy") > "Nueva implementación".
+ * 6. En el engranaje "Seleccionar tipo", elige: "Aplicación web".
+ * 7. Configura los siguientes campos exactamente:
+ *    - Descripción: "API Lanzador Autenticación"
+ *    - Ejecutar como: "Yo (tu_correo@gmail.com)"  <-- ¡CRÍTICO!
+ *    - Quién tiene acceso: "Cualquier persona" (o "Cualquiera con cuenta Google / del dominio") <-- ¡CRÍTICO!
+ * 8. Haz clic en "Implementar" y autoriza los permisos solicitados.
+ * 9. Copia la "URL de la aplicación web" (termina en /exec) y pégala en config.json
+ *    en el campo "apps_script_url".
+ * =============================================================================
  */
 
+// Nombre de la pestaña de usuarios en tu Google Sheet
 const HOJA_USUARIOS = "Usuarios";
 
+// ID opcional de la hoja (solo si el script es independiente y no está dentro de la hoja)
+// Si el script lo abriste desde Extensiones > Apps Script en la misma hoja, déjalo vacío ("").
+const ID_HOJA_CALCULO = "";
+
+// Secreto interno para firma de tokens temporales (puedes cambiarlo si deseas)
+const SECRETO_TOKEN = "Lanzador_Key_Secure_2026_@";
+
 function doGet(e) {
-  return handleRequest(e);
+  // Manejo de peticiones GET de prueba o verificación de estado
+  return jsonResponse({
+    success: true,
+    message: "Servicio de Autenticación de Lanzador activo. Utilice peticiones POST para iniciar sesión."
+  });
 }
 
 function doPost(e) {
-  return handleRequest(e);
-}
-
-function handleRequest(e) {
   try {
     var params = {};
     if (e && e.postData && e.postData.contents) {
@@ -36,18 +62,20 @@ function handleRequest(e) {
       params = e.parameter;
     }
 
-    var action = params.action || "test";
+    var action = (params.action || "login").toString().trim().toLowerCase();
 
-    if (action === "test") {
+    // Acción de comprobación de salud del backend
+    if (action === "test" || action === "ping") {
       return jsonResponse({
         success: true,
-        message: "API del Lanzador activa y funcionando correctamente."
+        message: "API Google Apps Script operativa y respondiendo correctamente."
       });
     }
 
+    // Acción de inicio de sesión
     if (action === "login") {
-      var usuario = (params.usuario || "").toString().trim().toLowerCase();
-      var password = (params.password || "").toString().trim();
+      var usuario = (params.usuario || params.user || params.username || "").toString().trim().toLowerCase();
+      var password = (params.password || params.contrasena || params.clave || "").toString().trim();
 
       if (!usuario || !password) {
         return jsonResponse({
@@ -56,82 +84,113 @@ function handleRequest(e) {
         });
       }
 
-      var ss = SpreadsheetApp.getActiveSpreadsheet();
-      var sheet = ss.getSheetByName(HOJA_USUARIOS);
+      // Obtener la hoja de cálculo de forma segura
+      var ss = null;
+      if (ID_HOJA_CALCULO && ID_HOJA_CALCULO.trim() !== "") {
+        ss = SpreadsheetApp.openById(ID_HOJA_CALCULO.trim());
+      } else {
+        ss = SpreadsheetApp.getActiveSpreadsheet();
+      }
 
+      if (!ss) {
+        return jsonResponse({
+          success: false,
+          message: "Error interno: No se pudo conectar con la base de datos de usuarios."
+        });
+      }
+
+      var sheet = ss.getSheetByName(HOJA_USUARIOS);
       if (!sheet) {
         return jsonResponse({
           success: false,
-          message: "No se encontró la pestaña '" + HOJA_USUARIOS + "' en la hoja de cálculo."
+          message: "Error de configuración: No existe la pestaña '" + HOJA_USUARIOS + "' en la hoja."
         });
       }
 
       var data = sheet.getDataRange().getValues();
-      if (data.length < 2) {
+      if (!data || data.length < 2) {
         return jsonResponse({
           success: false,
-          message: "No hay registros de usuarios en la hoja."
+          message: "No se encontraron usuarios registrados en el sistema."
         });
       }
 
+      // Encabezados normalizados
       var headers = data[0].map(function(h) { return h.toString().trim().toLowerCase(); });
       var idxUser = headers.indexOf("usuario");
       if (idxUser === -1) idxUser = headers.indexOf("user");
+      if (idxUser === -1) idxUser = headers.indexOf("correo");
+      if (idxUser === -1) idxUser = headers.indexOf("email");
 
       var idxPass = headers.indexOf("password");
       if (idxPass === -1) idxPass = headers.indexOf("contrasena");
       if (idxPass === -1) idxPass = headers.indexOf("contraseña");
+      if (idxPass === -1) idxPass = headers.indexOf("clave");
+      if (idxPass === -1) idxPass = headers.indexOf("hash");
 
       var idxModulos = headers.indexOf("modulos");
       if (idxModulos === -1) idxModulos = headers.indexOf("permisos");
+      if (idxModulos === -1) idxModulos = headers.indexOf("modules");
 
       var idxEstado = headers.indexOf("estado");
+      if (idxEstado === -1) idxEstado = headers.indexOf("status");
 
       if (idxUser === -1 || idxPass === -1) {
         return jsonResponse({
           success: false,
-          message: "La hoja debe tener columnas 'Usuario' y 'Password'."
+          message: "Estructura de hoja inválida. Debe incluir columnas 'Usuario' y 'Password'."
         });
       }
 
+      // Calcular hash SHA-256 de la contraseña recibida para permitir validación doble
+      var passSha256 = calcularHashSHA256(password);
+
       for (var i = 1; i < data.length; i++) {
         var rowUser = data[i][idxUser].toString().trim().toLowerCase();
-        var rowPass = data[i][idxPass].toString().trim();
-        var rowEstado = idxEstado !== -1 ? data[i][idxEstado].toString().trim().toLowerCase() : "activo";
-
         if (rowUser === usuario) {
-          if (rowEstado === "inactivo" || rowEstado === "bloqueado") {
+          var rowPass = data[i][idxPass].toString().trim();
+          var rowEstado = idxEstado !== -1 ? data[i][idxEstado].toString().trim().toLowerCase() : "activo";
+
+          // 1. Validar estado del usuario
+          if (rowEstado === "inactivo" || rowEstado === "bloqueado" || rowEstado === "desactivado" || rowEstado === "false" || rowEstado === "no") {
             return jsonResponse({
               success: false,
-              message: "El usuario está inactivo o bloqueado. Contacta al administrador."
+              message: "El usuario está inactivo o suspendido. Contacta al administrador."
             });
           }
 
-          if (rowPass !== password) {
+          // 2. Validar contraseña: soporta texto plano directo O hash SHA-256 almacenado
+          var esValida = false;
+          if (rowPass === password) {
+            esValida = true;
+          } else if (rowPass.toLowerCase() === passSha256.toLowerCase()) {
+            esValida = true;
+          }
+
+          if (!esValida) {
             return jsonResponse({
               success: false,
-              message: "Contraseña incorrecta."
+              message: "Usuario o contraseña incorrectos."
             });
           }
 
-          // Procesar módulos permitidos
+          // 3. Procesar lista de módulos permitidos
           var modulos = [];
           if (idxModulos !== -1) {
             var rawMod = data[i][idxModulos].toString().trim();
             if (rawMod === "*") {
               modulos = ["*"];
-            } else {
-              modulos = rawMod.split(",").map(function(m) { return m.trim(); }).filter(Boolean);
+            } else if (rawMod) {
+              modulos = rawMod.replace(/;/g, ",").split(",").map(function(m) { return m.trim(); }).filter(Boolean);
             }
           }
 
-          // Chequear columnas directas por módulo (ej. 'PDF_Unir', 'Gene_Documentos' = 'SI')
-          var systemHeaders = ["usuario", "user", "username", "correo", "email", "password", "contrasena", "contraseña", "clave", "pass", "estado", "status", "modulos", "permisos", "modules"];
+          // Chequear columnas individuales por módulo si existen (ej. 'PDF_Unir': 'SI')
+          var systemHeaders = ["usuario", "user", "username", "correo", "email", "password", "contrasena", "contraseña", "clave", "pass", "hash", "estado", "status", "modulos", "permisos", "modules"];
           var positiveVals = ["SI", "TRUE", "1", "YES", "OK", "ACTIVO", "X"];
 
           headers.forEach(function(h, colIdx) {
             if (systemHeaders.indexOf(h) !== -1) return;
-
             var val = data[i][colIdx].toString().trim().toUpperCase();
             if (positiveVals.indexOf(val) !== -1) {
               var rawHeader = data[0][colIdx].toString().trim();
@@ -150,18 +209,27 @@ function handleRequest(e) {
             }
           });
 
+          // 4. Generar token temporal de sesión seguro
+          var expiraEn = new Date().getTime() + (8 * 60 * 60 * 1000); // 8 horas
+          var tokenData = usuario + ":" + expiraEn;
+          var tokenFirma = Utilities.base64EncodeWebSafe(Utilities.computeHmacSha256Signature(tokenData, SECRETO_TOKEN));
+          var tokenTemporal = Utilities.base64EncodeWebSafe(tokenData) + "." + tokenFirma;
+
+          // Responder ÚNICAMENTE con los datos necesarios (cero exposición de la hoja)
           return jsonResponse({
             success: true,
             usuario: rowUser,
             modulos: modulos,
+            token: tokenTemporal,
             message: "Autenticación exitosa."
           });
         }
       }
 
+      // Si no coincide el usuario
       return jsonResponse({
         success: false,
-        message: "El usuario no se encuentra registrado."
+        message: "Usuario o contraseña incorrectos."
       });
     }
 
@@ -173,9 +241,32 @@ function handleRequest(e) {
   } catch (error) {
     return jsonResponse({
       success: false,
-      message: "Error en el servidor Apps Script: " + error.toString()
+      message: "Error interno del servidor de autenticación: " + error.toString()
     });
   }
+}
+
+/**
+ * Calcula el Hash SHA-256 de una cadena de texto.
+ * También se puede usar como fórmula personalizada dentro de Google Sheets:
+ * Ejemplo en celda: =SHA256("MiContraseña123")
+ */
+function SHA256(texto) {
+  return calcularHashSHA256(texto);
+}
+
+function calcularHashSHA256(input) {
+  if (!input) return "";
+  var rawHash = Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, input.toString(), Utilities.Charset.UTF_8);
+  var txtHash = "";
+  for (var i = 0; i < rawHash.length; i++) {
+    var hashVal = rawHash[i];
+    if (hashVal < 0) hashVal += 256;
+    var byteString = hashVal.toString(16);
+    if (byteString.length == 1) byteString = "0" + byteString;
+    txtHash += byteString;
+  }
+  return txtHash;
 }
 
 function jsonResponse(data) {

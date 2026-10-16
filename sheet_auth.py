@@ -1,182 +1,139 @@
 """
-Módulo de autenticación y lectura de permisos desde Google Sheets.
-Soporta:
-1. Google Sheets público/compartido mediante descarga CSV directa en tiempo real.
-2. Google Apps Script Web App (API JSON).
+=============================================================================
+MÓDULO DE AUTENTICACIÓN SEGURA MEDIANTE GOOGLE APPS SCRIPT WEB APP
+=============================================================================
+Este servicio se comunica exclusivamente con la API Web App de Google Apps Script.
+
+Arquitectura de Seguridad:
+1. No se conecta directamente a Google Sheets ni descarga archivos CSV en el cliente.
+2. La hoja de cálculo permanece 100% PRIVADA en Google Drive del administrador.
+3. El cliente envía credenciales mediante petición HTTPS POST hacia la Web App.
+4. Apps Script valida las credenciales en el servidor y retorna únicamente:
+   - success (bool)
+   - modulos (list)
+   - token (string con token temporal de sesión)
+   - message (string)
+=============================================================================
 """
-import io
-import re
-import csv
 import json
-import urllib.parse
 import requests
 
 class SheetAuth:
     def __init__(self, config):
         self.config = config
-        self.sheet_url = config.get("sheet_url", "")
-        self.sheet_name = config.get("sheet_name", "Usuarios")
-        self.api_url = config.get("apps_script_url", "")
+        self.api_url = (config.get("apps_script_url") or "").strip()
         self.timeout = config.get("network_timeout", 10)
+        self.session_token = None
+        self.session_user = None
 
-    @staticmethod
-    def extract_sheet_id(url):
-        """Extrae el ID del Google Sheet desde cualquier formato de enlace"""
-        match = re.search(r"/spreadsheets/d/([a-zA-Z0-9-_]+)", url)
-        if match:
-            return match.group(1)
-        return url.strip()
-
-    def _get_csv_export_url(self):
-        """Construye la URL de exportación CSV directa de Google Sheets"""
-        sheet_id = self.extract_sheet_id(self.sheet_url)
-        quoted_name = urllib.parse.quote(self.sheet_name)
-        # Formato gviz/tq devuelve el contenido de la pestaña especificada en CSV
-        return f"https://docs.google.com/spreadsheets/d/{sheet_id}/gviz/tq?tqx=out:csv&sheet={quoted_name}"
-
-    def autenticar_via_csv(self, username, password):
+    def autenticar(self, username, password):
         """
-        Descarga la hoja de usuarios y valida las credenciales y permisos.
+        Valida las credenciales enviando una petición POST a la Web App de Apps Script.
+        
+        Retorna:
+            (éxito: bool, modulos: list, mensaje: str)
         """
-        if not self.sheet_url:
-            return False, [], "No se ha configurado la URL del Google Sheet en config.json."
+        user_clean = (username or "").strip()
+        pass_clean = (password or "").strip()
 
-        csv_url = self._get_csv_export_url()
-        headers = {
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) LauncherAuth/1.0"
-        }
+        if not user_clean or not pass_clean:
+            return False, [], "Por favor ingrese su usuario y contraseña."
 
-        try:
-            response = requests.get(csv_url, headers=headers, timeout=self.timeout)
-            if response.status_code != 200:
-                return False, [], f"Error al conectar con Google Sheets (Código HTTP {response.status_code}). Verifica los permisos de acceso."
-
-            content = response.content.decode("utf-8-sig", errors="replace")
-            reader = csv.DictReader(io.StringIO(content))
-            
-            # Normalizar nombres de columnas a minúsculas sin espacios
-            if not reader.fieldnames:
-                return False, [], "La hoja de cálculo está vacía o no tiene encabezados válidos."
-
-            cleaned_fieldnames = {col: col.strip().lower().replace("ó", "o").replace("á", "a").replace("é", "e").replace("í", "i").replace("ú", "u") for col in reader.fieldnames if col}
-            
-            usuario_buscado = username.strip().lower()
-            password_buscado = password.strip()
-
-            encontrado = False
-            for row in reader:
-                # Mapear valores con columnas normalizadas
-                normalized_row = {cleaned_fieldnames.get(k, k): (v or "").strip() for k, v in row.items()}
-                
-                # Buscar columnas de usuario
-                user_val = (
-                    normalized_row.get("usuario") or 
-                    normalized_row.get("user") or 
-                    normalized_row.get("username") or 
-                    normalized_row.get("correo") or 
-                    normalized_row.get("email") or ""
-                )
-
-                if user_val.lower() == usuario_buscado:
-                    encontrado = True
-                    
-                    # Validar estado (si existe columna estado)
-                    estado = (normalized_row.get("estado") or normalized_row.get("status") or "activo").lower()
-                    if estado in ["inactivo", "bloqueado", "suspendido", "false", "no"]:
-                        return False, [], f"El usuario '{username}' se encuentra desactivado. Contacta al administrador."
-
-                    # Validar contraseña
-                    pass_val = (
-                        normalized_row.get("password") or 
-                        normalized_row.get("contrasena") or 
-                        normalized_row.get("clave") or 
-                        normalized_row.get("pass") or ""
-                    )
-
-                    if pass_val != password_buscado:
-                        return False, [], "Contraseña incorrecta."
-
-                    # Obtener módulos asignados
-                    modulos = []
-                    
-                    # Caso 1: Columna 'modulos' con lista separada por comas
-                    raw_modulos = (
-                        normalized_row.get("modulos") or 
-                        normalized_row.get("permisos") or 
-                        normalized_row.get("modules") or ""
-                    )
-                    
-                    if raw_modulos:
-                        if raw_modulos.strip() == "*":
-                            modulos = ["*"]  # Todos
-                        else:
-                            modulos = [m.strip() for m in raw_modulos.replace(";", ",").split(",") if m.strip()]
-                    
-                    # Caso 2: Columnas independientes por cada módulo (ej. 'PDF_Unir': 'SI', 'Gene_Documentos': 'SI')
-                    system_cols = {"usuario", "user", "username", "correo", "email", "password", "contrasena", "clave", "pass", "estado", "status", "modulos", "permisos", "modules"}
-                    positive_values = {"SI", "TRUE", "1", "YES", "OK", "ACTIVO", "X"}
-
-                    for col_orig, col_norm in cleaned_fieldnames.items():
-                        if col_norm in system_cols:
-                            continue
-                        
-                        val = normalized_row.get(col_norm, "").upper()
-                        if val in positive_values:
-                            # Añadir el nombre original de la columna como permiso
-                            if col_orig.strip() not in modulos:
-                                modulos.append(col_orig.strip())
-
-                            # Reconocer sinónimos habituales para los módulos del repositorio
-                            if "unir" in col_norm or "pdf" in col_norm:
-                                for syn in ["PDF_Unir", "PDF Unir", "Unir pdf", "unir_pdf"]:
-                                    if syn not in modulos:
-                                        modulos.append(syn)
-                            if "documento" in col_norm or "gene_" in col_norm or "gen_" in col_norm:
-                                for syn in ["Gene_Documentos", "Gene Documentos", "Gen_Documentos", "Documentos Masivos", "documentos_masivos"]:
-                                    if syn not in modulos:
-                                        modulos.append(syn)
-
-                    return True, modulos, "Autenticación exitosa."
-
-            if not encontrado:
-                return False, [], f"El usuario '{username}' no existe en el sistema."
-
-        except requests.exceptions.Timeout:
-            return False, [], "Tiempo de espera agotado al conectar con Google Sheets. Revisa tu conexión a internet."
-        except requests.exceptions.RequestException as e:
-            return False, [], f"Error de red al conectar con Google Sheets: {str(e)}"
-        except Exception as e:
-            return False, [], f"Error inesperado al validar usuario: {str(e)}"
-
-    def autenticar_via_api(self, username, password):
-        """
-        Valida contra un endpoint de Google Apps Script Web App
-        """
         if not self.api_url:
-            return self.autenticar_via_csv(username, password)
+            return (
+                False,
+                [],
+                "No se ha configurado la URL de Google Apps Script.\n"
+                "Por favor configure 'apps_script_url' en config.json o use el botón de configuración."
+            )
 
         payload = {
             "action": "login",
-            "usuario": username.strip(),
-            "password": password.strip()
+            "usuario": user_clean,
+            "password": pass_clean
         }
+
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "LanzadorAuth/2.0"
+        }
+
         try:
-            resp = requests.post(self.api_url, json=payload, timeout=self.timeout)
-            data = resp.json()
+            # allow_redirects=True es indispensable porque Apps Script responde con redirección 302
+            # hacia script.googleusercontent.com
+            response = requests.post(
+                self.api_url,
+                json=payload,
+                headers=headers,
+                timeout=self.timeout,
+                allow_redirects=True
+            )
+
+            if response.status_code != 200:
+                return (
+                    False,
+                    [],
+                    f"Error de conexión con el servidor (Código HTTP {response.status_code}). "
+                    "Verifique la URL del despliegue en Apps Script."
+                )
+
+            try:
+                data = response.json()
+            except Exception:
+                # Si no devolvió JSON directo, verificar el texto de respuesta
+                text_preview = response.text[:200] if response.text else "Respuesta vacía"
+                return (
+                    False,
+                    [],
+                    f"El servidor no devolvió una respuesta válida. Contenido recibido: {text_preview}"
+                )
+
             if data.get("success"):
-                return True, data.get("modulos", []), "Autenticación exitosa."
+                self.session_user = data.get("usuario", user_clean)
+                self.session_token = data.get("token")
+                modulos = data.get("modulos", [])
+                mensaje = data.get("message", "Autenticación exitosa.")
+                return True, modulos, mensaje
             else:
-                return False, [], data.get("message", "Credenciales incorrectas.")
+                mensaje_error = data.get("message", "Credenciales incorrectas o usuario no registrado.")
+                return False, [], mensaje_error
+
+        except requests.exceptions.Timeout:
+            return (
+                False,
+                [],
+                "Tiempo de espera agotado al conectar con el servidor de autenticación. "
+                "Revise su conexión a internet."
+            )
+        except requests.exceptions.ConnectionError:
+            return (
+                False,
+                [],
+                "No se pudo establecer conexión con Google Apps Script. "
+                "Verifique su conexión a internet o la URL configurada."
+            )
         except Exception as e:
-            # Fallback a CSV si falla la API
-            return self.autenticar_via_csv(username, password)
+            return False, [], f"Error al procesar autenticación: {str(e)}"
 
-    def autenticar(self, username, password):
-        """Punto de entrada principal para autenticación"""
-        if self.api_url:
-            return self.autenticar_via_api(username, password)
-        return self.autenticar_via_csv(username, password)
+    def verificar_conexion(self):
+        """Prueba rápida para verificar si la URL de Apps Script está activa"""
+        if not self.api_url:
+            return False, "URL de Apps Script no configurada."
 
-    # Alias para compatibilidad con llamadas en inglés
+        try:
+            payload = {"action": "test"}
+            response = requests.post(
+                self.api_url,
+                json=payload,
+                timeout=self.timeout,
+                allow_redirects=True
+            )
+            if response.status_code == 200:
+                data = response.json()
+                return True, data.get("message", "API activa.")
+            return False, f"Código HTTP: {response.status_code}"
+        except Exception as e:
+            return False, str(e)
+
+    # Alias para compatibilidad
     authenticate = autenticar
-

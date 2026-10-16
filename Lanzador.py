@@ -29,6 +29,24 @@ from icon_generator import generate_all_icons, get_icon_for_module
 from sheet_auth import SheetAuth
 from git_updater import GitUpdater, get_app_data_dir
 
+# Importaciones requeridas por los módulos dinámicos (Gene_Documentos, PDF_Unir, etc.)
+# para asegurar que PyInstaller empaquete todas sus dependencias en el .exe autónomo
+try:
+    import pandas
+    import openpyxl
+    import docxtpl
+    import docx
+    import pypdf
+    import reportlab
+except ImportError:
+    pass
+
+try:
+    import pythoncom
+    import win32com.client
+except ImportError:
+    pass
+
 # Determinación de directorios
 if getattr(sys, 'frozen', False):
     BASE_DIR = os.path.dirname(os.path.abspath(sys.executable))
@@ -45,14 +63,12 @@ SESSION_FILE = os.path.join(STORAGE_DIR, "session.json")
 DEFAULT_CONFIG = {
     "app_title": "AUTOMATIZACIÓN DE ARCHIVOS",
     "app_subtitle": "Seleccione una opción para continuar",
-    "sheet_url": "https://docs.google.com/spreadsheets/d/1v5u7tBZ9x_Ple_r_Maf2x3U8R4r4XMB0YJ-tu68X5jc/edit?usp=sharing/edit",
-    "sheet_name": "Usuarios",
     "apps_script_url": "",
     "modules_repo_url": "https://github.com/GigK1R4/Modulos_Lanzador.git",
-    "modules_dir": "Modulos_Lanzador",
+    "modules_dir": "Modulos",
     "auto_git_update": True,
     "auto_discover_modules": True,
-    "network_timeout": 8,
+    "network_timeout": 10,
     "modules": [
         {
             "id": "pdf_unir",
@@ -68,6 +84,14 @@ DEFAULT_CONFIG = {
             "title": "DOCUMENTOS\nMASIVOS",
             "script": "Gene_Documentos.py",
             "description": "Generación masiva de plantillas Word y conversión a PDF",
+            "enabled_by_default": False
+        },
+        {
+            "id": "formato_vinculacion",
+            "name": "Formato Vinculación",
+            "title": "FORMATO\nVINCULACIÓN",
+            "script": "FORMATO VINCULACION.py",
+            "description": "Generación masiva de formatos de vinculación FV y exportación a PDF",
             "enabled_by_default": False
         }
     ],
@@ -105,8 +129,6 @@ def load_config():
             with open(target_file, "r", encoding="utf-8") as f:
                 loaded = json.load(f)
                 config.update(loaded)
-                if not config.get("sheet_url"):
-                    config["sheet_url"] = DEFAULT_CONFIG["sheet_url"]
         except Exception as e:
             print(f"Error al leer configuración: {e}")
     else:
@@ -217,18 +239,26 @@ class LauncherApp(ctk.CTk):
             base_script = os.path.basename(script_raw).lower()
             seen_scripts[base_script] = True
             
-            repo_script_path = os.path.join(modules_dir_path, os.path.basename(script_raw))
-            base_script_path = os.path.join(BASE_DIR, os.path.basename(script_raw))
+            candidates = [
+                os.path.join(modules_dir_path, os.path.basename(script_raw)),
+                os.path.join(BASE_DIR, "Modulos", os.path.basename(script_raw)),
+                os.path.join(BASE_DIR, script_raw),
+                os.path.join(BASE_DIR, os.path.basename(script_raw)),
+                os.path.join(modules_dir_path, script_raw)
+            ]
             mod_copy = dict(mod)
-            if os.path.exists(repo_script_path):
-                mod_copy["script"] = repo_script_path
-            elif os.path.exists(base_script_path):
-                mod_copy["script"] = base_script_path
+            for cand in candidates:
+                if os.path.exists(cand):
+                    mod_copy["script"] = cand
+                    break
             result_modules.append(mod_copy)
 
         # 2. Descubrimiento automático de cualquier nuevo script en el repositorio
         CORE_FILES = {"lanzador.py", "git_updater.py", "icon_generator.py", "sheet_auth.py", "__init__.py"}
         search_dirs = [modules_dir_path]
+        modulos_sub = os.path.join(BASE_DIR, "Modulos")
+        if os.path.isdir(modulos_sub) and modulos_sub not in search_dirs:
+            search_dirs.append(modulos_sub)
         if BASE_DIR not in search_dirs and os.path.isdir(BASE_DIR):
             search_dirs.append(BASE_DIR)
 
@@ -507,7 +537,7 @@ class LauncherApp(ctk.CTk):
             self.user_entry.focus_set()
 
     def attempt_login(self):
-        """Valida credenciales contra Google Sheet en segundo plano"""
+        """Valida credenciales contra Google Apps Script en segundo plano"""
         user = self.user_entry.get().strip()
         pwd = self.pass_entry.get().strip()
 
@@ -515,15 +545,18 @@ class LauncherApp(ctk.CTk):
             self.login_msg.configure(text="Por favor ingrese usuario y contraseña.")
             return
 
+        if not self.config.get("apps_script_url"):
+            self.login_msg.configure(
+                text="Falta configurar la URL de Apps Script en config.json o en el botón ⚙.",
+                text_color="#f87171"
+            )
+            return
+
         self.btn_login.configure(state="disabled", text="VERIFICANDO...")
         self.login_msg.configure(text="", text_color="#38bdf8")
 
         def _bg_auth():
-            # Si no hay URL configurada, usar la de respaldo
-            if not self.config.get("sheet_url"):
-                self.config["sheet_url"] = DEFAULT_CONFIG["sheet_url"]
-                self.auth_service = SheetAuth(self.config)
-
+            self.auth_service = SheetAuth(self.config)
             success, modules_allowed, message = self.auth_service.autenticar(user, pwd)
             if success:
                 save_session(user, remembered=self.remember_var.get())
@@ -802,7 +835,7 @@ class LauncherApp(ctk.CTk):
                     return module.create_view(self.main_container, on_back=self.show_dashboard_screen)
 
                 # 2. Clases de vista conocidas
-                for cls_name in ["PDFUnirView", "GeneDocumentosView", "ModuleView"]:
+                for cls_name in ["PDFUnirView", "GeneDocumentosView", "FormatoVinculacionView", "PDFCompressorView", "ModuleView"]:
                     if hasattr(module, cls_name):
                         cls = getattr(module, cls_name)
                         return cls(self.main_container, on_back=self.show_dashboard_screen)
@@ -823,6 +856,7 @@ class LauncherApp(ctk.CTk):
         candidates = [
             script_filename,
             os.path.join(modules_dir_path, os.path.basename(script_filename)),
+            os.path.join(BASE_DIR, "Modulos", os.path.basename(script_filename)),
             os.path.join(BASE_DIR, script_filename),
             os.path.join(BASE_DIR, "Modulos_Lanzador", os.path.basename(script_filename))
         ]
@@ -858,6 +892,8 @@ class LauncherApp(ctk.CTk):
                 self.set_window_size_for_view("pdf_unir")
             elif "documento" in name.lower() or "gene" in name.lower():
                 self.set_window_size_for_view("gene_documentos")
+            elif "vincula" in name.lower() or "formato" in name.lower() or "contrato" in name.lower():
+                self.set_window_size_for_view("custom", custom_w=1040, custom_h=720, min_w=900, min_h=620)
             else:
                 self.set_window_size_for_view("default_module")
 
@@ -913,62 +949,102 @@ class LauncherApp(ctk.CTk):
             self.git_status_lbl.configure(text=text, text_color=color)
 
     # =========================================================================
-    # CONFIGURACIÓN RÁPIDA DE GOOGLE SHEET
+    # CONFIGURACIÓN RÁPIDA DE GOOGLE APPS SCRIPT WEB APP
     # =========================================================================
     def open_config_dialog(self):
-        """Ventana modal para editar la URL de Google Sheets fácilmente"""
+        """Ventana modal para editar la URL de la Web App de Apps Script"""
         dlg = ctk.CTkToplevel(self)
-        dlg.title("Configuración de Google Sheet")
-        dlg.geometry("520x360")
+        dlg.title("Configuración de Servidor de Autenticación")
+        dlg.geometry("560x360")
         dlg.transient(self)
         dlg.grab_set()
 
         lbl = ctk.CTkLabel(
             dlg,
-            text="Configurar Hoja de Usuarios",
+            text="Configurar Google Apps Script Web App",
             font=ctk.CTkFont(family="Segoe UI", size=16, weight="bold")
         )
         lbl.pack(pady=(20, 10))
 
         help_lbl = ctk.CTkLabel(
             dlg,
-            text="Ingresa el enlace público de tu Google Sheet (con permiso de lectura)\no la URL de la Web App en Apps Script:",
+            text="Ingresa la URL de la Web App generada en Apps Script (terminada en /exec).\n"
+                 "🔒 La hoja de cálculo permanece 100% privada y segura en tu cuenta.",
             font=ctk.CTkFont(size=12),
             text_color="#94a3b8",
-            wraplength=480
+            wraplength=500
         )
         help_lbl.pack(pady=(0, 15))
 
         entry_url = ctk.CTkEntry(
             dlg,
-            placeholder_text="https://docs.google.com/spreadsheets/d/.../edit",
-            width=460,
+            placeholder_text="https://script.google.com/macros/s/.../exec",
+            width=500,
             height=40
         )
-        entry_url.pack(padx=20, pady=(0, 10))
-        entry_url.insert(0, self.config.get("sheet_url", ""))
+        entry_url.pack(padx=20, pady=(0, 15))
+        entry_url.insert(0, self.config.get("apps_script_url", ""))
 
-        lbl_tab = ctk.CTkLabel(dlg, text="Nombre de la pestaña (por defecto 'Usuarios'):", font=ctk.CTkFont(size=12))
-        lbl_tab.pack(anchor="w", padx=30, pady=(5, 2))
+        status_lbl = ctk.CTkLabel(dlg, text="", font=ctk.CTkFont(size=11), text_color="#38bdf8")
+        status_lbl.pack(pady=(0, 10))
 
-        entry_tab = ctk.CTkEntry(dlg, width=460, height=36)
-        entry_tab.pack(padx=20, pady=(0, 20))
-        entry_tab.insert(0, self.config.get("sheet_name", "Usuarios"))
+        def _test_connection():
+            url_to_test = entry_url.get().strip()
+            if not url_to_test:
+                status_lbl.configure(text="Por favor ingresa una URL primero.", text_color="#f87171")
+                return
+            status_lbl.configure(text="Probando conexión...", text_color="#38bdf8")
+            temp_config = dict(self.config)
+            temp_config["apps_script_url"] = url_to_test
+            test_service = SheetAuth(temp_config)
+            
+            def _bg_test():
+                ok, msg = test_service.verificar_conexion()
+                if ok:
+                    self.safe_after(0, lambda: status_lbl.configure(
+                        text=f"✓ Conexión exitosa: {msg}",
+                        text_color="#4ade80"
+                    ))
+                else:
+                    self.safe_after(0, lambda: status_lbl.configure(
+                        text=f"✗ Error al conectar: {msg}",
+                        text_color="#f87171"
+                    ))
+
+            threading.Thread(target=_bg_test, daemon=True).start()
+
+        btn_row = ctk.CTkFrame(dlg, fg_color="transparent")
+        btn_row.pack(pady=10)
+
+        btn_test = ctk.CTkButton(
+            btn_row,
+            text="Probar Conexión",
+            command=_test_connection,
+            fg_color="#182c47",
+            hover_color="#243f66",
+            text_color="#38bdf8",
+            width=140
+        )
+        btn_test.pack(side="left", padx=8)
 
         def _save():
             new_url = entry_url.get().strip()
-            new_tab = entry_tab.get().strip() or "Usuarios"
-            self.config["sheet_url"] = new_url
-            self.config["sheet_name"] = new_tab
-            
+            self.config["apps_script_url"] = new_url
             save_config(self.config)
-
             self.auth_service = SheetAuth(self.config)
-            messagebox.showinfo("Configuración", "Configuración guardada exitosamente.")
+            messagebox.showinfo("Configuración", "URL de Google Apps Script guardada exitosamente.")
             dlg.destroy()
 
-        btn_save = ctk.CTkButton(dlg, text="Guardar Cambios", command=_save, fg_color="#00b4d8", text_color="#02293f")
-        btn_save.pack(pady=10)
+        btn_save = ctk.CTkButton(
+            btn_row,
+            text="Guardar Cambios",
+            command=_save,
+            fg_color="#00b4d8",
+            hover_color="#0096c7",
+            text_color="#02293f",
+            width=140
+        )
+        btn_save.pack(side="left", padx=8)
 
 
 if __name__ == "__main__":

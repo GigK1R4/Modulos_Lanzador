@@ -32,7 +32,7 @@ def get_app_data_dir():
     return app_dir
 
 class GitUpdater:
-    def __init__(self, base_dir=None, repo_url=None, modules_dir_name="Modulos_Lanzador"):
+    def __init__(self, base_dir=None, repo_url=None, modules_dir_name="Modulos"):
         self.is_frozen = getattr(sys, 'frozen', False)
         
         # Si está congelado (.exe), los módulos se guardan en AppData local para no crear carpetas visibles
@@ -43,13 +43,17 @@ class GitUpdater:
             # En ejecución como script .py:
             local_base = base_dir or os.path.dirname(os.path.abspath(__file__))
             local_mods = os.path.join(local_base, modules_dir_name)
-            if self.is_git_repo(local_base):
-                # Si la carpeta actual es un repositorio Git, actualizar este directorio directamente
-                self.storage_dir = local_base
-                self.modules_dir = local_base
-            elif os.path.isdir(local_mods):
+            fallback_mods = os.path.join(local_base, "Modulos")
+            if os.path.isdir(local_mods):
                 self.storage_dir = local_base
                 self.modules_dir = local_mods
+            elif os.path.isdir(fallback_mods):
+                self.storage_dir = local_base
+                self.modules_dir = fallback_mods
+            elif self.is_git_repo(local_base):
+                # Si la carpeta actual es un repositorio Git sin subcarpeta de módulos
+                self.storage_dir = local_base
+                self.modules_dir = local_base
             else:
                 self.storage_dir = get_app_data_dir()
                 self.modules_dir = os.path.join(self.storage_dir, modules_dir_name)

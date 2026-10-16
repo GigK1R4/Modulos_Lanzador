@@ -200,6 +200,31 @@ def create_lock_icon(path=None, size=(120, 120), color="#8892b0"):
         img.save(path, format="PNG")
     return img
 
+def create_formato_icon(path=None, size=(120, 120), color="#02293f"):
+    """Icono de formato oficial / vinculación con check y sello"""
+    img = Image.new("RGBA", size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    w, h = size
+
+    # Hoja principal del formato
+    d.rounded_rectangle([w*0.22, h*0.14, w*0.78, h*0.86], radius=7, fill="#ffffff", outline=color, width=5)
+    
+    # Líneas de texto del formato
+    d.line([w*0.32, h*0.28, w*0.68, h*0.28], fill=color, width=4)
+    d.line([w*0.32, h*0.40, w*0.68, h*0.40], fill=color, width=4)
+    d.line([w*0.32, h*0.52, w*0.55, h*0.52], fill=color, width=4)
+    
+    # Círculo de sello de verificación abajo a la derecha
+    cx, cy, r = w*0.66, h*0.68, 16
+    d.ellipse([cx-r, cy-r, cx+r, cy+r], fill=color)
+    # Checkmark blanco dentro del sello
+    d.line([cx-7, cy, cx-2, cy+6], fill="#ffffff", width=3)
+    d.line([cx-2, cy+6, cx+8, cy-5], fill="#ffffff", width=3)
+
+    if path:
+        img.save(path, format="PNG")
+    return img
+
 def generate_all_icons(base_dir=None, save_to_disk=False):
     """
     Genera todos los iconos. Por defecto los crea en memoria (PIL Images)
@@ -210,6 +235,9 @@ def generate_all_icons(base_dir=None, save_to_disk=False):
         "pdf": create_unir_pdf_icon(),
         "doc_masivos": create_doc_masivos_icon(),
         "gene_documentos": create_doc_masivos_icon(),
+        "formato_vinculacion": create_formato_icon(),
+        "formato": create_formato_icon(),
+        "vinculacion": create_formato_icon(),
         "edit": create_edit_icon(),
         "sync": create_sync_icon(),
         "sheet": create_sheet_icon(),
@@ -225,6 +253,7 @@ def generate_all_icons(base_dir=None, save_to_disk=False):
         icons_dir = ensure_icons_dir(base_dir)
         icons["unir_pdf"].save(os.path.join(icons_dir, "unir_pdf.png"))
         icons["doc_masivos"].save(os.path.join(icons_dir, "doc_masivos.png"))
+        icons["formato_vinculacion"].save(os.path.join(icons_dir, "formato_vinculacion.png"))
         icons["edit"].save(os.path.join(icons_dir, "edit.png"))
         icons["sync"].save(os.path.join(icons_dir, "sync.png"))
         icons["sheet"].save(os.path.join(icons_dir, "sheet.png"))
@@ -240,7 +269,9 @@ def get_icon_for_module(mod_name_or_script, icons_dict=None):
         icons_dict = generate_all_icons(save_to_disk=False)
 
     text = str(mod_name_or_script).lower()
-    if "unir" in text or "pdf" in text:
+    if "vincula" in text or "formato" in text or "contrato" in text:
+        return icons_dict.get("formato_vinculacion", icons_dict["doc_masivos"])
+    elif "unir" in text or "pdf" in text:
         return icons_dict.get("unir_pdf", icons_dict["default_script"])
     elif "doc" in text or "gene" in text or "word" in text:
         return icons_dict.get("doc_masivos", icons_dict["default_script"])

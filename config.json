@@ -1,14 +1,12 @@
 {
   "app_title": "AUTOMATIZACIÓN DE ARCHIVOS",
   "app_subtitle": "Seleccione una opción para continuar",
-  "sheet_url": "https://docs.google.com/spreadsheets/d/1v5u7tBZ9x_Ple_r_Maf2x3U8R4r4XMB0YJ-tu68X5jc/edit?usp=sharing/edit",
-  "sheet_name": "Usuarios",
-  "apps_script_url": "",
+  "apps_script_url": "https://script.google.com/macros/s/AKfycbxUwG45u00rmrpepYXRTNLxxJR-yJXz6-OHxrRVr_supskr7JjebpWMD9xhBU59DmcA/exec",
   "modules_repo_url": "https://github.com/GigK1R4/Modulos_Lanzador.git",
-  "modules_dir": "Modulos_Lanzador",
+  "modules_dir": "Modulos",
   "auto_git_update": true,
   "auto_discover_modules": true,
-  "network_timeout": 8,
+  "network_timeout": 10,
   "modules": [
     {
       "id": "pdf_unir",
@@ -24,6 +22,14 @@
       "title": "DOCUMENTOS\nMASIVOS",
       "script": "Gene_Documentos.py",
       "description": "Generación masiva de plantillas Word y conversión a PDF",
+      "enabled_by_default": false
+    },
+    {
+      "id": "formato_vinculacion",
+      "name": "Formato Vinculación",
+      "title": "FORMATO\nVINCULACIÓN",
+      "script": "FORMATO VINCULACION.py",
+      "description": "Generación masiva de formatos de vinculación FV y exportación a PDF",
       "enabled_by_default": false
     }
   ],
