@@ -212,6 +212,20 @@ class LauncherApp(ctk.CTk):
         self.geometry("1020x680")
         self.minsize(920, 600)
         
+        # Cargar icono de la ventana de forma segura
+        for ico_cand in [
+            os.path.join(BASE_DIR, "Logo_app.ico"),
+            os.path.join(BASE_DIR, "pdf.ico"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "Logo_app.ico"),
+            os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdf.ico")
+        ]:
+            if os.path.exists(ico_cand):
+                try:
+                    self.iconbitmap(ico_cand)
+                    break
+                except Exception:
+                    pass
+        
         # Color de fondo azul marino idéntico al diseño corporativo
         self.bg_color = self.config.get("theme", {}).get("window_bg", "#0b1626")
         self.configure(fg_color=self.bg_color)

@@ -626,8 +626,11 @@ def main():
 
     # Intentar asignar icono de la aplicación si existe
     for ico_cand in [
+        resource_path("Logo_app.ico"),
         resource_path("pdf.ico"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "Logo_app.ico"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pdf.ico"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "Logo_app.ico"),
         os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdf.ico"),
     ]:
         if os.path.exists(ico_cand):
