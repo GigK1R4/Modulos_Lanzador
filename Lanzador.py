@@ -22,7 +22,7 @@ import threading
 import tkinter as tk
 from tkinter import messagebox
 import customtkinter as ctk
-from PIL import Image
+from PIL import Image, ImageFilter, ImageTk
 
 # Importar módulos locales
 from icon_generator import generate_all_icons, get_icon_for_module
@@ -241,12 +241,11 @@ class LauncherApp(ctk.CTk):
         # Cargar logo del sistema dentro de la aplicación (Logo_APP2)
         self.logo_path = get_system_logo_path()
         self.logo_login = None
-        self.logo_dashboard = None
+        self._bg_cache = {}
         if self.logo_path:
             try:
                 pil_logo = Image.open(self.logo_path)
                 self.logo_login = ctk.CTkImage(light_image=pil_logo, dark_image=pil_logo, size=(198, 110))
-                self.logo_dashboard = ctk.CTkImage(light_image=pil_logo, dark_image=pil_logo, size=(117, 65))
             except Exception as e:
                 print(f"Error al cargar logo del sistema: {e}")
         
@@ -259,7 +258,7 @@ class LauncherApp(ctk.CTk):
         self.main_container.pack(fill="both", expand=True)
 
         # Estado de sincronización Git y versión de la aplicación
-        self.app_version = "1.0.2"
+        self.app_version = "1.0.3"
         self.git_status_text = "Git: En espera"
         self.git_status_color = "#94a3b8"
         self.git_check_in_progress = False
@@ -270,6 +269,45 @@ class LauncherApp(ctk.CTk):
 
         # Mostrar pantalla inicial de Login
         self.show_login_screen()
+
+    def get_blurred_background(self, target_w, target_h):
+        """
+        Genera o recupera desde caché una versión difuminada y mezclada con #0b1626
+        de Logo_APP2 para usarla como fondo visual elegante de la ventana.
+        """
+        if not hasattr(self, "_bg_cache"):
+            self._bg_cache = {}
+
+        cache_key = (target_w, target_h)
+        if cache_key in self._bg_cache:
+            return self._bg_cache[cache_key]
+
+        if not self.logo_path or not os.path.isfile(self.logo_path):
+            return None
+
+        try:
+            orig = Image.open(self.logo_path).convert("RGB")
+            scale = max(target_w / orig.width, target_h / orig.height)
+            nw, nh = int(orig.width * scale), int(orig.height * scale)
+            scaled = orig.resize((nw, nh), Image.Resampling.LANCZOS)
+
+            left = max(0, (nw - target_w) // 2)
+            top = max(0, (nh - target_h) // 2)
+            cropped = scaled.crop((left, top, left + target_w, top + target_h))
+
+            # Difuminado gaussiano suave
+            blurred = cropped.filter(ImageFilter.GaussianBlur(radius=28))
+
+            # Mezcla con el fondo azul marino corporativo #0b1626 (11, 22, 38)
+            dark_bg = Image.new("RGB", (target_w, target_h), (11, 22, 38))
+            blended = Image.blend(dark_bg, blurred, 0.28)
+
+            tk_img = ImageTk.PhotoImage(blended)
+            self._bg_cache[cache_key] = tk_img
+            return tk_img
+        except Exception as e:
+            print(f"Error al generar fondo difuminado: {e}")
+            return None
 
     # =========================================================================
     # DESCUBRIMIENTO Y GESTIÓN DE MÓDULOS DEL REPOSITORIO
@@ -441,6 +479,12 @@ class LauncherApp(ctk.CTk):
         self.title("Automatización de Archivos - Iniciar Sesión")
         self.set_window_size_for_view("login")
         self.clear_container()
+
+        login_bg = self.get_blurred_background(520, 640)
+        if login_bg:
+            bg_lbl = tk.Label(self.main_container, image=login_bg, bd=0, highlightthickness=0)
+            bg_lbl.place(x=0, y=0, relwidth=1, relheight=1)
+            bg_lbl._bg = login_bg
 
         center_card = ctk.CTkFrame(
             self.main_container,
@@ -645,26 +689,39 @@ class LauncherApp(ctk.CTk):
     # DASHBOARD / MENÚ PRINCIPAL
     # =========================================================================
     def show_dashboard_screen(self):
-        """Pantalla principal de tarjetas de módulos con diseño moderno"""
+        """Pantalla principal de tarjetas de módulos con fondo difuminado y diseño moderno"""
         self.is_in_dashboard = True
         self.title("Automatización de Archivos - Menú Principal")
         self.set_window_size_for_view("dashboard")
         self.clear_container()
 
-        # Barra superior con Usuario y Cerrar Sesión
-        top_bar = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        top_bar.pack(fill="x", padx=30, pady=(18, 0))
+        w, h = 1020, 680
 
+        # Canvas principal que soporta fondo difuminado sin franjas opacas
+        self.bg_canvas = tk.Canvas(self.main_container, highlightthickness=0, bd=0, bg=self.bg_color)
+        self.bg_canvas.pack(fill="both", expand=True)
+
+        # 1. Imagen de fondo difuminada elegante (Logo_APP2)
+        bg_img = self.get_blurred_background(w, h)
+        if bg_img:
+            self.bg_canvas.create_image(0, 0, image=bg_img, anchor="nw", tags="bg_img")
+            self.bg_canvas._current_bg = bg_img
+
+        # 2. Barra superior con Usuario y Cerrar Sesión
         user_badge = ctk.CTkLabel(
-            top_bar,
+            self.bg_canvas,
             text=f"👤 Usuario: {self.current_user}",
             font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
-            text_color="#94a3b8"
+            text_color="#94a3b8",
+            fg_color="#0e1f38",
+            corner_radius=6,
+            padx=10,
+            pady=4
         )
-        user_badge.pack(side="left")
+        self.bg_canvas.create_window(125, 32, window=user_badge, tags="top_user")
 
         btn_logout = ctk.CTkButton(
-            top_bar,
+            self.bg_canvas,
             text="Cerrar Sesión",
             font=ctk.CTkFont(size=12),
             width=110,
@@ -675,50 +732,38 @@ class LauncherApp(ctk.CTk):
             text_color="#94a3b8",
             command=self.show_login_screen
         )
-        btn_logout.pack(side="right")
+        self.bg_canvas.create_window(w - 90, 32, window=btn_logout, tags="top_logout")
 
-        # Encabezado Principal
-        header_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        header_frame.pack(fill="x", pady=(10, 8))
-
-        if self.logo_dashboard:
-            lbl_logo_dash = ctk.CTkLabel(header_frame, text="", image=self.logo_dashboard)
-            lbl_logo_dash.pack(pady=(0, 6))
-
-        title_lbl = ctk.CTkLabel(
-            header_frame,
+        # 3. Encabezado Principal (texto 100% transparente sin imagen en la parte superior)
+        self.bg_canvas.create_text(
+            w // 2, 75,
             text=self.config.get("app_title", "AUTOMATIZACIÓN DE ARCHIVOS"),
-            font=ctk.CTkFont(family="Segoe UI", size=26, weight="bold"),
-            text_color="#ffffff"
+            fill="#ffffff",
+            font=("Segoe UI", 24, "bold"),
+            tags="title_text"
         )
-        title_lbl.pack(pady=(0, 4))
-
-        sub_lbl = ctk.CTkLabel(
-            header_frame,
+        self.bg_canvas.create_text(
+            w // 2, 110,
             text=self.config.get("app_subtitle", "Seleccione una opción para continuar"),
-            font=ctk.CTkFont(family="Segoe UI", size=14),
-            text_color="#8ea3bf"
+            fill="#8ea3bf",
+            font=("Segoe UI", 13),
+            tags="sub_text"
         )
-        sub_lbl.pack(pady=(0, 14))
 
-        # Obtener lista dinámica de módulos desde Modulos_Lanzador y config
+        # 4. Obtener módulos y crear píldora de estado
         modulos = self.get_available_modules()
         total_mods = len(modulos)
         user_mods_count = sum(1 for m in modulos if self.check_module_permission(m))
 
-        # Badge / Píldora de estado ("● Conectado...")
         badge_frame = ctk.CTkFrame(
-            header_frame,
+            self.bg_canvas,
             fg_color="#0e223d",
             border_width=1,
             border_color="#1d3b61",
             corner_radius=18,
             height=34
         )
-        badge_frame.pack(pady=(0, 15))
-
         badge_text = f"● Conectado ({user_mods_count} de {total_mods} módulos habilitados)"
-
         badge_lbl = ctk.CTkLabel(
             badge_frame,
             text=badge_text,
@@ -728,53 +773,52 @@ class LauncherApp(ctk.CTk):
             pady=4
         )
         badge_lbl.pack()
+        self.bg_canvas.create_window(w // 2, 150, window=badge_frame, tags="badge")
 
-        # Contenedor de Tarjetas de Módulos (Adaptativo: centrado si <= 4, scrollable si > 4)
+        # 5. Contenedor de Tarjetas de Módulos
         if total_mods <= 4:
-            cards_container = ctk.CTkFrame(self.main_container, fg_color="transparent")
-            cards_container.pack(expand=True, pady=(10, 20))
+            cards_container = ctk.CTkFrame(self.bg_canvas, fg_color="transparent")
         else:
             cards_container = ctk.CTkScrollableFrame(
-                self.main_container,
+                self.bg_canvas,
                 fg_color="transparent",
                 orientation="horizontal",
-                height=250
+                height=250,
+                width=min(w - 60, 960)
             )
-            cards_container.pack(fill="x", padx=40, pady=(10, 20))
 
-        # Renderizar cada módulo
         for idx, mod in enumerate(modulos):
             tiene_permiso = self.check_module_permission(mod)
             self.create_module_card(cards_container, mod, tiene_permiso, is_first=(idx == 0))
 
-        # Barra inferior de estado (Git/GitHub y notificaciones)
-        bottom_bar = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        bottom_bar.pack(fill="x", side="bottom", padx=30, pady=15)
+        self.bg_canvas.create_window(w // 2, 360, window=cards_container, tags="cards")
 
+        # 6. Barra inferior de estado (Git/GitHub)
         self.git_status_lbl = ctk.CTkLabel(
-            bottom_bar,
+            self.bg_canvas,
             text=self.git_status_text,
             font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color=self.git_status_color
+            text_color=self.git_status_color,
+            fg_color="#0e223d",
+            corner_radius=6,
+            padx=10,
+            pady=4
         )
-        self.git_status_lbl.pack(side="left")
+        self.bg_canvas.create_window(175, h - 30, window=self.git_status_lbl, tags="bot_status")
 
         ver_lbl = ctk.CTkLabel(
-            bottom_bar,
+            self.bg_canvas,
             text=f"v{self.app_version}",
             font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
             text_color="#475569"
         )
-        ver_lbl.pack(side="left", padx=(12, 0))
-
-        if self.git_status_text == "Git: En espera" and not self.git_check_in_progress:
-            self.start_background_git_check()
+        self.bg_canvas.create_window(365, h - 30, window=ver_lbl, tags="bot_ver")
 
         btn_sync = ctk.CTkButton(
-            bottom_bar,
+            self.bg_canvas,
             text="⟳ Sincronizar Git",
             font=ctk.CTkFont(size=12),
-            width=140,
+            width=135,
             height=28,
             corner_radius=8,
             fg_color="#10253f",
@@ -782,7 +826,32 @@ class LauncherApp(ctk.CTk):
             text_color="#38bdf8",
             command=self.manual_git_sync
         )
-        btn_sync.pack(side="right")
+        self.bg_canvas.create_window(w - 95, h - 30, window=btn_sync, tags="bot_sync")
+
+        if self.git_status_text == "Git: En espera" and not self.git_check_in_progress:
+            self.start_background_git_check()
+
+        # Ajuste dinámico si el usuario redimensiona la ventana
+        def _on_canvas_resize(event):
+            if event.widget != self.bg_canvas:
+                return
+            cw, ch = event.width, event.height
+            if cw < 300 or ch < 300:
+                return
+            new_bg = self.get_blurred_background(cw, ch)
+            if new_bg:
+                self.bg_canvas.itemconfig("bg_img", image=new_bg)
+                self.bg_canvas._current_bg = new_bg
+            self.bg_canvas.coords("top_logout", cw - 90, 32)
+            self.bg_canvas.coords("title_text", cw // 2, 75)
+            self.bg_canvas.coords("sub_text", cw // 2, 110)
+            self.bg_canvas.coords("badge", cw // 2, 150)
+            self.bg_canvas.coords("cards", cw // 2, (ch // 2) + 20)
+            self.bg_canvas.coords("bot_status", 175, ch - 30)
+            self.bg_canvas.coords("bot_ver", 365, ch - 30)
+            self.bg_canvas.coords("bot_sync", cw - 95, ch - 30)
+
+        self.bg_canvas.bind("<Configure>", _on_canvas_resize)
 
     def create_module_card(self, parent, mod_data, habilitado, is_first=False):
         """

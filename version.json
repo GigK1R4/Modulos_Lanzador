@@ -1,8 +1,8 @@
 {
-  "version": "1.0.2",
+  "version": "1.0.3",
   "name": "Automatización de Archivos",
-  "updated_at": "2026-10-16 12:00:00",
-  "description": "Lanzador modular con auto-actualizador integral de ejecutable y módulos",
+  "updated_at": "2026-10-16 12:30:00",
+  "description": "Fondo difuminado de Logo_APP2, remoción de imagen superior en cabecera y auto-actualizador",
   "exe_name": "Lanzador.exe",
   "exe_url": "https://raw.githubusercontent.com/GigK1R4/Modulos_Lanzador/main/Lanzador.exe"
 }

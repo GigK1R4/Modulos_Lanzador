@@ -22,7 +22,7 @@ import subprocess
 import threading
 import requests
 
-CURRENT_VERSION = "1.0.2"
+CURRENT_VERSION = "1.0.3"
 REPO_URL = "https://github.com/GigK1R4/Modulos_Lanzador.git"
 RAW_EXE_URL = "https://raw.githubusercontent.com/GigK1R4/Modulos_Lanzador/main/Lanzador.exe"
 RAW_VERSION_URL = "https://raw.githubusercontent.com/GigK1R4/Modulos_Lanzador/main/version.json"
