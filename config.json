@@ -44,7 +44,7 @@
       "id": "word_a_pdf",
       "name": "Documento Word a PDF",
       "title": "WORD\nA PDF",
-      "script": "Documento Word a PDS.py",
+      "script": "Documento Word a PDF.py",
       "description": "Conversión y fusión de documentos Word a PDF tamaño Carta",
       "enabled_by_default": false
     }

@@ -132,7 +132,7 @@ DEFAULT_CONFIG = {
             "id": "word_a_pdf",
             "name": "Documento Word a PDF",
             "title": "WORD\nA PDF",
-            "script": "Documento Word a PDS.py",
+            "script": "Documento Word a PDF.py",
             "description": "Conversión y fusión de documentos Word a PDF tamaño Carta",
             "enabled_by_default": False
         }
@@ -1060,7 +1060,7 @@ class LauncherApp(ctk.CTk):
                 mw = min_size[0] if min_size else None
                 mh = min_size[1] if min_size else None
                 self.set_window_size_for_view("custom", custom_w=pref_size[0], custom_h=pref_size[1], min_w=mw, min_h=mh)
-            elif "word" in name.lower() or "pds" in name.lower():
+            elif "word" in name.lower():
                 self.set_window_size_for_view("custom", custom_w=1040, custom_h=700, min_w=880, min_h=580)
             elif "unir" in name.lower() or "pdf" in name.lower():
                 self.set_window_size_for_view("pdf_unir")
