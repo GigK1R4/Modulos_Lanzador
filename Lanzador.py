@@ -55,6 +55,32 @@ else:
     BASE_DIR = os.path.dirname(os.path.abspath(__file__))
     STORAGE_DIR = BASE_DIR
 
+def resource_path(relative_path: str) -> str:
+    """Ruta correcta para archivos incluidos con PyInstaller o ejecución directa"""
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+def get_system_logo_path():
+    """Busca el archivo de imagen corporativa Logo_APP2 en el sistema"""
+    names = ["Logo_APP2.jpeg", "Logo_APP2.jpg", "Logo_APP2.png", "Logo_APP2"]
+    search_dirs = [
+        BASE_DIR,
+        getattr(sys, '_MEIPASS', ''),
+        STORAGE_DIR,
+        os.path.dirname(os.path.abspath(__file__))
+    ]
+    for d in search_dirs:
+        if not d:
+            continue
+        for name in names:
+            cand = os.path.join(d, name)
+            if os.path.isfile(cand):
+                return cand
+    return None
+
 # Archivos de configuración y sesión (Aislados para no ensuciar el PC del usuario)
 EXE_CONFIG_FILE = os.path.join(BASE_DIR, "config.json")
 STORAGE_CONFIG_FILE = os.path.join(STORAGE_DIR, "config.json")
@@ -63,7 +89,7 @@ SESSION_FILE = os.path.join(STORAGE_DIR, "session.json")
 DEFAULT_CONFIG = {
     "app_title": "AUTOMATIZACIÓN DE ARCHIVOS",
     "app_subtitle": "Seleccione una opción para continuar",
-    "apps_script_url": "",
+    "apps_script_url": "https://script.google.com/macros/s/AKfycbxUwG45u00rmrpepYXRTNLxxJR-yJXz6-OHxrRVr_supskr7JjebpWMD9xhBU59DmcA/exec",
     "modules_repo_url": "https://github.com/GigK1R4/Modulos_Lanzador.git",
     "modules_dir": "Modulos",
     "auto_git_update": True,
@@ -212,19 +238,17 @@ class LauncherApp(ctk.CTk):
         self.geometry("1020x680")
         self.minsize(920, 600)
         
-        # Cargar icono de la ventana de forma segura
-        for ico_cand in [
-            os.path.join(BASE_DIR, "Logo_app.ico"),
-            os.path.join(BASE_DIR, "pdf.ico"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "Logo_app.ico"),
-            os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdf.ico")
-        ]:
-            if os.path.exists(ico_cand):
-                try:
-                    self.iconbitmap(ico_cand)
-                    break
-                except Exception:
-                    pass
+        # Cargar logo del sistema dentro de la aplicación (Logo_APP2)
+        self.logo_path = get_system_logo_path()
+        self.logo_login = None
+        self.logo_dashboard = None
+        if self.logo_path:
+            try:
+                pil_logo = Image.open(self.logo_path)
+                self.logo_login = ctk.CTkImage(light_image=pil_logo, dark_image=pil_logo, size=(198, 110))
+                self.logo_dashboard = ctk.CTkImage(light_image=pil_logo, dark_image=pil_logo, size=(117, 65))
+            except Exception as e:
+                print(f"Error al cargar logo del sistema: {e}")
         
         # Color de fondo azul marino idéntico al diseño corporativo
         self.bg_color = self.config.get("theme", {}).get("window_bg", "#0b1626")
@@ -361,7 +385,7 @@ class LauncherApp(ctk.CTk):
         screen_h = self.winfo_screenheight()
 
         sizes = {
-            "login": (500, 560, 480, 520),
+            "login": (520, 640, 480, 580),
             "dashboard": (1020, 680, 920, 600),
             "pdf_unir": (1060, 720, 960, 640),
             "gene_documentos": (1080, 750, 980, 660),
@@ -419,10 +443,18 @@ class LauncherApp(ctk.CTk):
             border_width=2,
             border_color="#1a3557",
             width=460,
-            height=500
+            height=580
         )
         center_card.place(relx=0.5, rely=0.5, anchor="center")
         center_card.pack_propagate(False)
+
+        # Logo de la aplicación dentro del sistema (Logo_APP2)
+        if self.logo_login:
+            lbl_logo = ctk.CTkLabel(center_card, text="", image=self.logo_login)
+            lbl_logo.pack(pady=(16, 2))
+            title_pad = 2
+        else:
+            title_pad = 35
 
         # Título del Login
         title_lbl = ctk.CTkLabel(
@@ -431,7 +463,7 @@ class LauncherApp(ctk.CTk):
             font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
             text_color="#ffffff"
         )
-        title_lbl.pack(pady=(35, 6))
+        title_lbl.pack(pady=(title_pad, 6))
 
         sub_lbl = ctk.CTkLabel(
             center_card,
@@ -641,7 +673,11 @@ class LauncherApp(ctk.CTk):
 
         # Encabezado Principal
         header_frame = ctk.CTkFrame(self.main_container, fg_color="transparent")
-        header_frame.pack(fill="x", pady=(15, 10))
+        header_frame.pack(fill="x", pady=(10, 8))
+
+        if self.logo_dashboard:
+            lbl_logo_dash = ctk.CTkLabel(header_frame, text="", image=self.logo_dashboard)
+            lbl_logo_dash.pack(pady=(0, 6))
 
         title_lbl = ctk.CTkLabel(
             header_frame,
