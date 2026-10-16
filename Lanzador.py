@@ -258,6 +258,12 @@ class LauncherApp(ctk.CTk):
         self.main_container = ctk.CTkFrame(self, fg_color="transparent")
         self.main_container.pack(fill="both", expand=True)
 
+        # Estado de sincronización Git y versión de la aplicación
+        self.app_version = "1.0.2"
+        self.git_status_text = "Git: En espera"
+        self.git_status_color = "#94a3b8"
+        self.git_check_in_progress = False
+
         # Comprobar actualizaciones de GitHub en segundo plano al abrir
         if self.config.get("auto_git_update", True):
             self.start_background_git_check()
@@ -747,11 +753,22 @@ class LauncherApp(ctk.CTk):
 
         self.git_status_lbl = ctk.CTkLabel(
             bottom_bar,
-            text="Git: Comprobando actualizaciones de módulos...",
+            text=self.git_status_text,
             font=ctk.CTkFont(family="Segoe UI", size=12),
-            text_color="#64748b"
+            text_color=self.git_status_color
         )
         self.git_status_lbl.pack(side="left")
+
+        ver_lbl = ctk.CTkLabel(
+            bottom_bar,
+            text=f"v{self.app_version}",
+            font=ctk.CTkFont(family="Segoe UI", size=11, weight="bold"),
+            text_color="#475569"
+        )
+        ver_lbl.pack(side="left", padx=(12, 0))
+
+        if self.git_status_text == "Git: En espera" and not self.git_check_in_progress:
+            self.start_background_git_check()
 
         btn_sync = ctk.CTkButton(
             bottom_bar,
@@ -976,17 +993,36 @@ class LauncherApp(ctk.CTk):
             pass
 
     # =========================================================================
-    # ACTUALIZACIONES GIT / GITHUB DEL REPOSITORIO DE MÓDULOS
+    # ACTUALIZACIONES GIT / GITHUB DEL REPOSITORIO DE MÓDULOS Y EJECUTABLE
     # =========================================================================
-    def start_background_git_check(self):
-        """Comprueba e instala actualizaciones del repositorio de módulos en segundo plano"""
+    def start_background_git_check(self, force=False):
+        """Comprueba e instala actualizaciones del repositorio de módulos y ejecutable en segundo plano"""
+        if self.git_check_in_progress and not force:
+            return
+
+        self.git_check_in_progress = True
+
         def _bg():
             self.safe_after(0, lambda: self._update_git_ui("Git: Buscando actualizaciones en GitHub...", "#38bdf8"))
             try:
                 def _on_status(msg):
                     self.safe_after(0, lambda: self._update_git_ui(f"Git: {msg}", "#38bdf8"))
 
-                has_changes, message = self.git_updater.update_all(on_status_callback=_on_status)
+                res = self.git_updater.update_all(on_status_callback=_on_status)
+
+                # Si es un dict estructurado (nueva versión de git_updater)
+                if isinstance(res, dict):
+                    if res.get("exe_update_ready"):
+                        new_exe = res.get("new_exe_path")
+                        bat_file = res.get("bat_path")
+                        self.safe_after(100, lambda: self._handle_exe_restart(new_exe, bat_file))
+                        return
+                    has_changes = res.get("has_changes", False)
+                    message = res.get("message", "Al día.")
+                elif isinstance(res, (tuple, list)):
+                    has_changes, message = res[0], res[1]
+                else:
+                    has_changes, message = False, str(res)
 
                 if has_changes:
                     self.safe_after(0, lambda: self._update_git_ui(f"Git: {message}", "#4ade80"))
@@ -994,9 +1030,27 @@ class LauncherApp(ctk.CTk):
                 else:
                     self.safe_after(0, lambda: self._update_git_ui(f"Git: {message}", "#94a3b8"))
             except Exception as e:
-                self.safe_after(0, lambda: self._update_git_ui(f"Git: {str(e)}", "#f87171"))
+                self.safe_after(0, lambda: self._update_git_ui(f"Git: Error al sincronizar ({str(e)})", "#f87171"))
+            finally:
+                self.git_check_in_progress = False
 
         threading.Thread(target=_bg, daemon=True).start()
+
+    def _handle_exe_restart(self, new_exe, bat_file):
+        """Notifica al usuario y ejecuta el script de actualización y reinicio seguro del .exe"""
+        self._update_git_ui("Git: Reiniciando con nueva versión...", "#4ade80")
+        try:
+            messagebox.showinfo(
+                "Actualización del Lanzador",
+                "¡Se ha descargado la versión más actual del Lanzador desde GitHub!\n\n"
+                "La aplicación se reiniciará automáticamente ahora para aplicar todas las mejoras."
+            )
+            cmd = f'"{bat_file}" {os.getpid()} "{new_exe}" "{sys.executable}"'
+            subprocess.Popen(cmd, shell=True, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
+        except Exception as e:
+            print(f"Error al iniciar script de reemplazo: {e}")
+        self.destroy()
+        sys.exit(0)
 
     def refresh_dashboard_if_visible(self):
         """Refresca la pantalla de módulos si está actualmente activa"""
@@ -1005,13 +1059,16 @@ class LauncherApp(ctk.CTk):
 
     def manual_git_sync(self):
         """Sincronización manual provocada por el usuario"""
-        if hasattr(self, "git_status_lbl"):
-            self.git_status_lbl.configure(text="Sincronizando con Git remoto...", text_color="#38bdf8")
-        self.start_background_git_check()
+        self.start_background_git_check(force=True)
 
     def _update_git_ui(self, text, color):
+        self.git_status_text = text
+        self.git_status_color = color
         if hasattr(self, "git_status_lbl") and self.git_status_lbl.winfo_exists():
-            self.git_status_lbl.configure(text=text, text_color=color)
+            try:
+                self.git_status_lbl.configure(text=text, text_color=color)
+            except Exception:
+                pass
 
     # =========================================================================
     # CONFIGURACIÓN RÁPIDA DE GOOGLE APPS SCRIPT WEB APP

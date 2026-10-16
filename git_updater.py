@@ -1,9 +1,16 @@
 """
-Módulo de actualización automática y descarga desde GitHub para el Lanzador.
+=============================================================================
+MÓDULO DE ACTUALIZACIÓN INTEGRAL (GIT / HTTP / AUTO-UPDATE DE EJECUTABLE)
+=============================================================================
 Soporta:
-1. Actualización nativa con Git (si git está instalado).
-2. Descarga directa desde GitHub vía HTTP/Zipball con 'requests' (si git NO está instalado, ideal para cualquier PC).
-3. Ubicación en AppData local para no crear carpetas en el escritorio o ruta del ejecutable.
+1. Sincronización completa de módulos y recursos (Modulos/*.py, Logo_APP2, etc.)
+2. Auto-actualización transparente de Lanzador.exe desde GitHub:
+   - Descarga la nueva versión en segundo plano.
+   - Crea script batch de reemplazo seguro para evitar bloqueo de Windows.
+   - Reinicia automáticamente con la versión más reciente.
+3. Detección rápida y confiable tanto con Git como vía HTTP directa (sin Git).
+4. No deja la interfaz bloqueada ni congelada en ningún estado.
+=============================================================================
 """
 import os
 import sys
@@ -11,9 +18,15 @@ import io
 import json
 import shutil
 import zipfile
-import tempfile
 import subprocess
 import threading
+import requests
+
+CURRENT_VERSION = "1.0.2"
+REPO_URL = "https://github.com/GigK1R4/Modulos_Lanzador.git"
+RAW_EXE_URL = "https://raw.githubusercontent.com/GigK1R4/Modulos_Lanzador/main/Lanzador.exe"
+RAW_VERSION_URL = "https://raw.githubusercontent.com/GigK1R4/Modulos_Lanzador/main/version.json"
+
 
 def get_app_data_dir():
     """
@@ -26,15 +39,17 @@ def get_app_data_dir():
             base = os.path.join(os.path.expanduser("~"), "AppData", "Local")
     else:
         base = os.path.expanduser("~/.local/share")
-    
+
     app_dir = os.path.join(base, "LanzadorApp")
     os.makedirs(app_dir, exist_ok=True)
     return app_dir
 
+
 class GitUpdater:
     def __init__(self, base_dir=None, repo_url=None, modules_dir_name="Modulos"):
         self.is_frozen = getattr(sys, 'frozen', False)
-        
+        self.current_version = CURRENT_VERSION
+
         # Si está congelado (.exe), los módulos se guardan en AppData local para no crear carpetas visibles
         if self.is_frozen:
             self.storage_dir = get_app_data_dir()
@@ -50,15 +65,11 @@ class GitUpdater:
             elif os.path.isdir(fallback_mods):
                 self.storage_dir = local_base
                 self.modules_dir = fallback_mods
-            elif self.is_git_repo(local_base):
-                # Si la carpeta actual es un repositorio Git sin subcarpeta de módulos
-                self.storage_dir = local_base
-                self.modules_dir = local_base
             else:
-                self.storage_dir = get_app_data_dir()
+                self.storage_dir = local_base
                 self.modules_dir = os.path.join(self.storage_dir, modules_dir_name)
 
-        self.repo_url = repo_url or "https://github.com/GigK1R4/Modulos_Lanzador.git"
+        self.repo_url = repo_url or REPO_URL
         self.commit_cache_file = os.path.join(self.storage_dir, "last_commit.json")
         os.makedirs(self.modules_dir, exist_ok=True)
 
@@ -69,13 +80,15 @@ class GitUpdater:
             if os.name == 'nt':
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
-            res = subprocess.run(["git", "--version"], capture_output=True, timeout=3, startupinfo=startupinfo)
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+            res = subprocess.run(["git", "--version"], capture_output=True, timeout=3, startupinfo=startupinfo, env=env)
             return res.returncode == 0
         except Exception:
             return False
 
-    def _run_git_cmd(self, args, cwd=None, timeout=25):
-        """Ejecuta un comando git de forma segura capturando la salida"""
+    def _run_git_cmd(self, args, cwd=None, timeout=20):
+        """Ejecuta un comando git de forma segura evitando prompts de terminal"""
         try:
             target_cwd = cwd or self.storage_dir
             startupinfo = None
@@ -83,13 +96,17 @@ class GitUpdater:
                 startupinfo = subprocess.STARTUPINFO()
                 startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
+            env = os.environ.copy()
+            env["GIT_TERMINAL_PROMPT"] = "0"
+
             result = subprocess.run(
                 ["git"] + args,
                 cwd=target_cwd,
                 capture_output=True,
                 text=True,
                 timeout=timeout,
-                startupinfo=startupinfo
+                startupinfo=startupinfo,
+                env=env
             )
             return result.returncode == 0, result.stdout.strip(), result.stderr.strip()
         except Exception as e:
@@ -100,19 +117,144 @@ class GitUpdater:
         return os.path.isdir(os.path.join(target, ".git"))
 
     # =========================================================================
-    # MÉTODO HTTP / GITHUB DIRECTO (Funciona en CUALQUIER PC sin Git instalado)
+    # AUTO-ACTUALIZADOR DE EJECUTABLE (Lanzador.exe)
+    # =========================================================================
+    def check_exe_update_needed(self):
+        """
+        Comprueba de forma rápida si existe una versión más reciente de Lanzador.exe en GitHub.
+        Compara tamaño de archivo (Content-Length) y versión en version.json.
+        """
+        try:
+            target_exe = sys.executable if self.is_frozen else os.path.join(self.storage_dir, "Lanzador.exe")
+            if not os.path.isfile(target_exe):
+                return False, 0, ""
+
+            current_size = os.path.getsize(target_exe)
+
+            # 1. Comprobar Content-Length remoto del ejecutable
+            head_resp = requests.head(RAW_EXE_URL, timeout=8)
+            if head_resp.status_code == 200:
+                remote_size = int(head_resp.headers.get("Content-Length", 0))
+                # Si el archivo remoto tiene tamaño válido y difiere del local
+                if remote_size > 15_000_000 and abs(remote_size - current_size) > 1024:
+                    return True, remote_size, "Actualización disponible por tamaño de ejecutable"
+
+            # 2. Comprobar version.json
+            v_resp = requests.get(RAW_VERSION_URL, timeout=8)
+            if v_resp.status_code == 200:
+                v_data = v_resp.json()
+                remote_ver = v_data.get("version", "")
+                if remote_ver and remote_ver != self.current_version:
+                    return True, 0, f"Nueva versión {remote_ver} disponible"
+
+        except Exception as e:
+            print(f"[GitUpdater] Error al comprobar actualización de ejecutable: {e}")
+
+        return False, 0, ""
+
+    def download_and_prepare_exe_update(self, on_status_callback=None):
+        """
+        Descarga la nueva versión de Lanzador.exe desde GitHub y genera el script de reinicio batch.
+        Retorna (exito, nuevo_exe_path, bat_path, mensaje).
+        """
+        try:
+            if on_status_callback:
+                on_status_callback("Descargando actualización del Lanzador (0%)...")
+
+            update_dir = get_app_data_dir()
+            new_exe_path = os.path.join(update_dir, "Lanzador_update.exe")
+
+            # Descarga por fragmentos con reporte de porcentaje
+            resp = requests.get(RAW_EXE_URL, stream=True, timeout=60)
+            if resp.status_code != 200:
+                return False, None, None, f"Error HTTP {resp.status_code} al descargar ejecutable."
+
+            total_size = int(resp.headers.get("Content-Length", 0))
+            downloaded = 0
+
+            with open(new_exe_path, "wb") as f:
+                for chunk in resp.iter_content(chunk_size=262144): # 256KB
+                    if chunk:
+                        f.write(chunk)
+                        downloaded += len(chunk)
+                        if total_size > 0 and on_status_callback:
+                            pct = int((downloaded / total_size) * 100)
+                            on_status_callback(f"Descargando actualización del Lanzador ({pct}%)...")
+
+            # Validación del ejecutable descargado
+            if not os.path.isfile(new_exe_path) or os.path.getsize(new_exe_path) < 15_000_000:
+                try:
+                    os.remove(new_exe_path)
+                except Exception:
+                    pass
+                return False, None, None, "La descarga del ejecutable está incompleta o corrupta."
+
+            with open(new_exe_path, "rb") as f:
+                header = f.read(2)
+                if header != b'MZ':
+                    try:
+                        os.remove(new_exe_path)
+                    except Exception:
+                        pass
+                    return False, None, None, "El archivo descargado no es un ejecutable PE válido."
+
+            # Crear script batch de reemplazo seguro en Windows
+            bat_path = os.path.join(update_dir, "apply_update.bat")
+            bat_content = """@echo off
+setlocal enabledelayedexpansion
+set "PID=%~1"
+set "NEW_EXE=%~2"
+set "TARGET_EXE=%~3"
+
+:: Esperar a que el proceso anterior cierre
+set /a attempts=0
+:WAIT_PID
+tasklist /fi "PID eq !PID!" 2>nul | findstr /i "!PID!" >nul
+if not errorlevel 1 (
+    timeout /t 1 /nobreak >nul
+    set /a attempts+=1
+    if !attempts! leq 35 goto WAIT_PID
+)
+timeout /t 1 /nobreak >nul
+
+:: Reemplazar el ejecutable antiguo por el nuevo
+copy /y "!NEW_EXE!" "!TARGET_EXE!" >nul
+if errorlevel 1 (
+    del /f /q "!TARGET_EXE!.old" 2>nul
+    move /y "!TARGET_EXE!" "!TARGET_EXE!.old" >nul
+    copy /y "!NEW_EXE!" "!TARGET_EXE!" >nul
+)
+
+:: Limpiar archivo temporal de descarga
+del /f /q "!NEW_EXE!" 2>nul
+
+:: Iniciar el ejecutable actualizado
+start "" "!TARGET_EXE!"
+
+:: Eliminar este script batch
+(goto) 2>nul & del /f /q "%~f0"
+"""
+            with open(bat_path, "w", encoding="utf-8") as f:
+                f.write(bat_content)
+
+            return True, new_exe_path, bat_path, "Actualización lista para aplicar."
+
+        except Exception as e:
+            return False, None, None, f"Error al preparar actualización: {e}"
+
+    # =========================================================================
+    # MÉTODO HTTP / GITHUB DIRECTO PARA MÓDULOS Y RECURSOS
     # =========================================================================
     def _download_via_http(self, on_status_callback=None):
         """
-        Descarga el repositorio como archivo ZIP desde GitHub y extrae los scripts en modules_dir.
-        Funciona en cualquier ordenador sin necesidad de tener Git instalado.
+        Descarga el repositorio como archivo ZIP desde GitHub y sincroniza:
+        - Archivos de módulos en self.modules_dir
+        - Recursos (Logo_APP2, config, etc.) en self.storage_dir
         """
         try:
-            import requests
             if on_status_callback:
                 on_status_callback("Descargando módulos desde GitHub...")
 
-            # Probar rama main, luego master
             branches = ["main", "master"]
             zip_content = None
             for branch in branches:
@@ -126,42 +268,46 @@ class GitUpdater:
                     continue
 
             if not zip_content:
-                return False, "No se pudo descargar el paquete desde GitHub."
+                return False, "No se pudo conectar con GitHub."
 
             # Extraer archivos al directorio correspondiente
-            target_extract = self.storage_dir if self.is_frozen else self.modules_dir
             with zipfile.ZipFile(io.BytesIO(zip_content)) as zf:
                 for member in zf.infolist():
                     filename = member.filename
-                    # Extraer solo archivos (evitando la carpeta contenedora inicial)
                     parts = filename.split("/", 1)
                     if len(parts) > 1 and parts[1]:
                         rel_path = parts[1]
-                        if not rel_path.endswith("/"): # Es archivo
-                            dest_path = os.path.join(target_extract, rel_path)
-                            os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                            with zf.open(member) as source, open(dest_path, "wb") as target:
+                        if not rel_path.endswith("/"):
+                            # 1. Guardar en storage_dir
+                            dest_storage = os.path.join(self.storage_dir, rel_path)
+                            os.makedirs(os.path.dirname(dest_storage), exist_ok=True)
+                            with zf.open(member) as source, open(dest_storage, "wb") as target:
                                 shutil.copyfileobj(source, target)
 
-            return True, "Módulos descargados exitosamente desde GitHub."
+                            # 2. Si es archivo de módulo, asegurar que esté en self.modules_dir
+                            if rel_path.startswith("Modulos/"):
+                                sub_name = rel_path.split("Modulos/", 1)[1]
+                                if sub_name:
+                                    dest_mod = os.path.join(self.modules_dir, sub_name)
+                                    os.makedirs(os.path.dirname(dest_mod), exist_ok=True)
+                                    shutil.copy2(dest_storage, dest_mod)
+
+            return True, "Módulos y recursos sincronizados desde GitHub."
         except Exception as e:
             return False, f"Error en descarga directa: {e}"
 
     def check_http_updates(self):
         """Consulta si hay nuevos commits en GitHub a través de su API pública"""
         try:
-            import requests
             api_url = "https://api.github.com/repos/GigK1R4/Modulos_Lanzador/commits/main"
-            resp = requests.get(api_url, timeout=10)
+            resp = requests.get(api_url, timeout=8)
             if resp.status_code != 200:
                 api_url = "https://api.github.com/repos/GigK1R4/Modulos_Lanzador/commits/master"
-                resp = requests.get(api_url, timeout=10)
+                resp = requests.get(api_url, timeout=8)
 
             if resp.status_code == 200:
                 data = resp.json()
                 latest_sha = data.get("sha", "")
-                
-                # Comparar con el último commit guardado
                 saved_sha = ""
                 if os.path.exists(self.commit_cache_file):
                     try:
@@ -193,11 +339,11 @@ class GitUpdater:
         if existing:
             return
 
-        # Si está congelado en PyInstaller, los archivos pueden estar en sys._MEIPASS
         bundled_dirs = []
         if hasattr(sys, '_MEIPASS'):
+            bundled_dirs.append(os.path.join(sys._MEIPASS, "Modulos"))
             bundled_dirs.append(os.path.join(sys._MEIPASS, "Modulos_Lanzador"))
-        local_dev = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Modulos_Lanzador")
+        local_dev = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Modulos")
         bundled_dirs.append(local_dev)
 
         for bdir in bundled_dirs:
@@ -211,62 +357,74 @@ class GitUpdater:
                     pass
 
     # =========================================================================
-    # MÉTODO PRINCIPAL DE ACTUALIZACIÓN
+    # MÉTODO PRINCIPAL DE ACTUALIZACIÓN INTEGRAL
     # =========================================================================
     def update_all(self, on_status_callback=None):
         """
-        Comprueba y actualiza los módulos de GitHub:
-        1. Si tiene Git instalado y es repo git: usa git fetch/pull.
-        2. Si no tiene Git o falla: usa descarga HTTP directa de GitHub.
-        3. Si está sin conexión: asegura que existan los módulos embebidos de respaldo.
+        Comprueba y actualiza tanto los módulos como el ejecutable Lanzador.exe:
+        Retorna dict con resultados detallados.
         """
-        has_changes = False
-        message = ""
+        result = {
+            "has_changes": False,
+            "message": "",
+            "exe_update_ready": False,
+            "new_exe_path": None,
+            "bat_path": None
+        }
 
         # Asegurar módulos iniciales de respaldo por si no hay conexión
         self.ensure_embedded_fallback()
 
-        # En modo desarrollo dentro del propio repositorio Git, no sobreescribir ni clonar
+        # En modo script python local (desarrollo), solo hacer git pull si es repo
         if not self.is_frozen and self.is_git_repo(self.storage_dir):
             if on_status_callback:
-                on_status_callback("Repositorio local de desarrollo activo.")
-            return False, "Modo desarrollo local activo (al día)."
+                on_status_callback("Actualizando repositorio local...")
+            ok_pull, _, _ = self._run_git_cmd(["pull", "--ff-only"], cwd=self.storage_dir, timeout=15)
+            result["has_changes"] = ok_pull
+            result["message"] = "[OK] Repositorio local sincronizado." if ok_pull else "[OK] Repositorio local al día."
+            return result
 
+        # 1. Comprobar si hay actualización del ejecutable Lanzador.exe
+        if self.is_frozen:
+            if on_status_callback:
+                on_status_callback("Comprobando versión del ejecutable...")
+            needs_exe_up, _, _ = self.check_exe_update_needed()
+            if needs_exe_up:
+                ok_down, new_exe, bat_file, down_msg = self.download_and_prepare_exe_update(on_status_callback=on_status_callback)
+                if ok_down:
+                    result["has_changes"] = True
+                    result["exe_update_ready"] = True
+                    result["new_exe_path"] = new_exe
+                    result["bat_path"] = bat_file
+                    result["message"] = "[OK] Nueva versión de Lanzador.exe lista para reiniciar."
+                    return result
+
+        # 2. Sincronizar módulos (Git o HTTP)
         if self._has_git():
-            # Flujo con Git
             if not self.is_git_repo(self.modules_dir):
                 if on_status_callback:
-                    on_status_callback("Conectando con GitHub (Git)...")
-                # Si está vacío o no es git repo
-                ok, _, err = self._run_git_cmd(["clone", self.repo_url, self.modules_dir], cwd=self.storage_dir, timeout=45)
-                if ok:
-                    has_changes = True
-                    message = "[OK] Repositorio clonado al día desde GitHub."
-                else:
-                    # Fallback a HTTP
-                    ok_http, msg_http = self._download_via_http(on_status_callback)
-                    has_changes = ok_http
-                    message = f"[OK] {msg_http}" if ok_http else f"Error: {err}"
+                    on_status_callback("Sincronizando módulos desde GitHub...")
+                ok_http, msg_http = self._download_via_http(on_status_callback)
+                result["has_changes"] = ok_http
+                result["message"] = f"[OK] {msg_http}" if ok_http else "Módulos cargados (modo local)."
             else:
                 if on_status_callback:
-                    on_status_callback("Buscando actualizaciones en GitHub...")
-                ok_fetch, _, _ = self._run_git_cmd(["fetch", "--quiet"], cwd=self.modules_dir, timeout=15)
+                    on_status_callback("Buscando cambios en GitHub...")
+                ok_fetch, _, _ = self._run_git_cmd(["fetch", "--quiet"], cwd=self.modules_dir, timeout=12)
                 if ok_fetch:
                     ok_rev, out_rev, _ = self._run_git_cmd(["rev-list", "HEAD..@{u}", "--count"], cwd=self.modules_dir, timeout=5)
                     if ok_rev and out_rev.isdigit() and int(out_rev) > 0:
                         if on_status_callback:
-                            on_status_callback("Descargando cambios de GitHub...")
-                        ok_pull, out_pull, _ = self._run_git_cmd(["pull", "--ff-only"], cwd=self.modules_dir, timeout=25)
-                        if not ok_pull:
-                            ok_pull, out_pull, _ = self._run_git_cmd(["pull"], cwd=self.modules_dir, timeout=25)
-                        has_changes = ok_pull
-                        message = "[OK] Módulos actualizados con los últimos cambios de GitHub."
+                            on_status_callback("Descargando cambios de módulos...")
+                        ok_pull, _, _ = self._run_git_cmd(["pull", "--ff-only"], cwd=self.modules_dir, timeout=15)
+                        result["has_changes"] = ok_pull
+                        result["message"] = "[OK] Módulos actualizados con GitHub."
                     else:
-                        message = "[OK] Repositorio de módulos al día (GitHub)."
+                        result["message"] = "[OK] Módulos y sistema al día."
                 else:
-                    message = "[OK] Módulos cargados (modo local/sin conexión)."
+                    result["message"] = "[OK] Módulos locales activos."
         else:
-            # Flujo sin Git (PC estándar sin herramientas de desarrollador)
+            # Sin Git instalado
             if on_status_callback:
                 on_status_callback("Comprobando actualizaciones en GitHub...")
 
@@ -276,24 +434,13 @@ class GitUpdater:
             if has_up or not existing_scripts:
                 ok_http, msg_http = self._download_via_http(on_status_callback)
                 if ok_http:
-                    has_changes = True
+                    result["has_changes"] = True
                     if latest_sha:
                         self.save_last_commit(latest_sha)
-                    message = "[OK] Módulos descargados y actualizados desde GitHub."
+                    result["message"] = "[OK] Módulos actualizados desde GitHub."
                 else:
-                    message = f"[OK] Módulos cargados ({len(existing_scripts)} disponibles)."
+                    result["message"] = f"[OK] Módulos locales activos ({len(existing_scripts)} disponibles)."
             else:
-                message = "[OK] Repositorio de módulos al día (GitHub)."
+                result["message"] = "[OK] Módulos y sistema al día."
 
-        return has_changes, message
-
-    def start_background_check(self, on_finished_callback=None, on_status_callback=None):
-        """Ejecuta la comprobación en un hilo secundario sin congelar la interfaz"""
-        def _thread_target():
-            has_changes, msg = self.update_all(on_status_callback=on_status_callback)
-            if on_finished_callback:
-                on_finished_callback(has_changes, msg)
-
-        t = threading.Thread(target=_thread_target, daemon=True)
-        t.start()
-        return t
+        return result
