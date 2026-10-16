@@ -798,8 +798,7 @@ class FormatoVinculacionView(ctk.CTkFrame):
 # -----------------------------------------------------------------------------
 def check_for_pending_lanzador_update():
     """Si se ejecuta dentro de un Lanzador.exe desactualizado, ofrece reemplazarlo con la versión descargada"""
-    if not getattr(sys, 'frozen', False):
-        return
+    return
     try:
         app_data = os.environ.get("LOCALAPPDATA", "")
         if not app_data:

@@ -609,51 +609,8 @@ class PDFCompressorView(ctk.CTkFrame):
 # PUNTOS DE ENTRADA
 # -----------------------------------------------------------------------------
 def check_for_pending_lanzador_update():
-    """Si se ejecuta dentro de un Lanzador.exe desactualizado, ofrece reemplazarlo con la versión descargada"""
-    if not getattr(sys, 'frozen', False):
-        return
-    try:
-        app_data = os.environ.get("LOCALAPPDATA", "")
-        if not app_data:
-            return
-        downloaded_exe = os.path.join(app_data, "LanzadorApp", "Lanzador.exe")
-        current_exe = sys.executable
-        if os.path.isfile(downloaded_exe) and os.path.isfile(current_exe):
-            down_size = os.path.getsize(downloaded_exe)
-            cur_size = os.path.getsize(current_exe)
-            if down_size > 15_000_000 and abs(down_size - cur_size) > 1024:
-                resp = messagebox.askyesno(
-                    "Actualización del Lanzador disponible",
-                    "Se ha descargado una versión más reciente de Lanzador.exe desde GitHub.\n\n"
-                    "¿Desea actualizar y reiniciar el Lanzador ahora para aplicar todos los cambios?"
-                )
-                if resp:
-                    bat_path = os.path.join(app_data, "LanzadorApp", "apply_update.bat")
-                    with open(bat_path, "w", encoding="utf-8") as f:
-                        f.write(f'''@echo off
-set "PID={os.getpid()}"
-set "NEW_EXE={downloaded_exe}"
-set "TARGET_EXE={current_exe}"
-:WAIT_PID
-tasklist /fi "PID eq %PID%" 2>nul | findstr /i "%PID%" >nul
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    goto WAIT_PID
-)
-timeout /t 1 /nobreak >nul
-copy /y "%NEW_EXE%" "%TARGET_EXE%" >nul
-if errorlevel 1 (
-    del /f /q "%TARGET_EXE!.old" 2>nul
-    move /y "%TARGET_EXE%" "%TARGET_EXE!.old" >nul
-    copy /y "%NEW_EXE%" "%TARGET_EXE%" >nul
-)
-start "" "%TARGET_EXE%"
-(goto) 2>nul & del /f /q "%~f0"
-''')
-                    subprocess.Popen(f'"{bat_path}"', shell=True, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
-                    sys.exit(0)
-    except Exception:
-        pass
+    """La actualización centralizada es gestionada de forma exclusiva por Lanzador.py"""
+    pass
 
 
 def create_view(parent, on_back=None):

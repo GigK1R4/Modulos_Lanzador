@@ -1106,8 +1106,9 @@ class LauncherApp(ctk.CTk):
                 if isinstance(res, dict):
                     if res.get("exe_update_ready"):
                         new_exe = res.get("new_exe_path")
-                        bat_file = res.get("bat_path")
-                        self.safe_after(100, lambda: self._handle_exe_restart(new_exe, bat_file))
+                        runner_file = res.get("runner_path") or res.get("bat_path")
+                        remote_ver = res.get("remote_version", "")
+                        self.safe_after(100, lambda: self._handle_exe_restart(new_exe, runner_file, remote_ver))
                         return
                     has_changes = res.get("has_changes", False)
                     message = res.get("message", "Al día.")
@@ -1128,17 +1129,43 @@ class LauncherApp(ctk.CTk):
 
         threading.Thread(target=_bg, daemon=True).start()
 
-    def _handle_exe_restart(self, new_exe, bat_file):
-        """Notifica al usuario y ejecuta el script de actualización y reinicio seguro del .exe"""
+    def _handle_exe_restart(self, new_exe, runner_file, remote_ver=""):
+        """Pregunta amablemente al usuario y ejecuta el script de actualización silencioso (sin ventanas negras)"""
+        ver_text = f" (v{remote_ver})" if remote_ver else ""
+        resp = messagebox.askyesno(
+            "Actualización del Lanzador disponible",
+            f"Se ha descargado una versión más reciente{ver_text} del Lanzador desde GitHub.\n\n"
+            "¿Desea reiniciar el programa ahora para aplicar las mejoras?\n\n"
+            "(Si presiona 'No', continuará usando la aplicación con normalidad)",
+            icon="question"
+        )
+        if not resp:
+            self._update_git_ui("Git: Actualización pospuesta por el usuario.", "#94a3b8")
+            self.git_check_in_progress = False
+            return
+
         self._update_git_ui("Git: Reiniciando con nueva versión...", "#4ade80")
         try:
-            messagebox.showinfo(
-                "Actualización del Lanzador",
-                "¡Se ha descargado la versión más actual del Lanzador desde GitHub!\n\n"
-                "La aplicación se reiniciará automáticamente ahora para aplicar todas las mejoras."
-            )
-            cmd = f'"{bat_file}" {os.getpid()} "{new_exe}" "{sys.executable}"'
-            subprocess.Popen(cmd, shell=True, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
+            target_exe = sys.executable
+            if runner_file and runner_file.endswith(".ps1"):
+                # Ejecución 100% silenciosa en PowerShell sin ninguna ventana negra
+                ps_args = [
+                    "powershell.exe",
+                    "-NoProfile",
+                    "-WindowStyle", "Hidden",
+                    "-ExecutionPolicy", "Bypass",
+                    "-File", runner_file,
+                    "-pid_wait", str(os.getpid()),
+                    "-new_exe", new_exe,
+                    "-target_exe", target_exe
+                ]
+                subprocess.Popen(
+                    ps_args,
+                    creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW
+                )
+            else:
+                cmd = f'"{runner_file}" {os.getpid()} "{new_exe}" "{target_exe}"'
+                subprocess.Popen(cmd, shell=True, creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NO_WINDOW)
         except Exception as e:
             print(f"Error al iniciar script de reemplazo: {e}")
         self.destroy()

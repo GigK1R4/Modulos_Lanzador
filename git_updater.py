@@ -17,15 +17,56 @@ import sys
 import io
 import json
 import shutil
+import re
+import time
 import zipfile
 import subprocess
 import threading
 import requests
 
-CURRENT_VERSION = "1.0.3"
+CURRENT_VERSION = "1.0.4"
 REPO_URL = "https://github.com/GigK1R4/Modulos_Lanzador.git"
 RAW_EXE_URL = "https://raw.githubusercontent.com/GigK1R4/Modulos_Lanzador/main/Lanzador.exe"
 RAW_VERSION_URL = "https://raw.githubusercontent.com/GigK1R4/Modulos_Lanzador/main/version.json"
+
+
+def is_remote_version_newer(local_ver: str, remote_ver: str) -> bool:
+    """Compara versiones semánticas (ej: '1.0.4' vs '1.0.3'). Retorna True solo si remote_ver > local_ver."""
+    try:
+        def _parse(v):
+            return [int(x) for x in re.sub(r'[^0-9\.]', '', str(v)).split('.') if x.isdigit()]
+        l_parts = _parse(local_ver)
+        r_parts = _parse(remote_ver)
+        max_len = max(len(l_parts), len(r_parts))
+        l_parts += [0] * (max_len - len(l_parts))
+        r_parts += [0] * (max_len - len(r_parts))
+        return r_parts > l_parts
+    except Exception:
+        return False
+
+
+def get_local_version_from_disk(base_dir=None):
+    """Busca la versión en version.json local embebido o en disco"""
+    search_dirs = [
+        getattr(sys, '_MEIPASS', ''),
+        base_dir or '',
+        os.path.dirname(os.path.abspath(__file__)),
+        os.getcwd()
+    ]
+    for d in search_dirs:
+        if not d:
+            continue
+        v_path = os.path.join(d, "version.json")
+        if os.path.isfile(v_path):
+            try:
+                with open(v_path, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    v = str(data.get("version", "")).strip()
+                    if v:
+                        return v
+            except Exception:
+                pass
+    return CURRENT_VERSION
 
 
 def get_app_data_dir():
@@ -48,7 +89,7 @@ def get_app_data_dir():
 class GitUpdater:
     def __init__(self, base_dir=None, repo_url=None, modules_dir_name="Modulos"):
         self.is_frozen = getattr(sys, 'frozen', False)
-        self.current_version = CURRENT_VERSION
+        self.current_version = get_local_version_from_disk(base_dir)
 
         # Si está congelado (.exe), los módulos se guardan en AppData local para no crear carpetas visibles
         if self.is_frozen:
@@ -122,40 +163,31 @@ class GitUpdater:
     def check_exe_update_needed(self):
         """
         Comprueba de forma rápida si existe una versión más reciente de Lanzador.exe en GitHub.
-        Compara tamaño de archivo (Content-Length) y versión en version.json.
+        Compara la versión semántica de version.json remoto vs la versión actual local.
         """
         try:
             target_exe = sys.executable if self.is_frozen else os.path.join(self.storage_dir, "Lanzador.exe")
             if not os.path.isfile(target_exe):
-                return False, 0, ""
+                return False, "", "Ejecutable no encontrado"
 
-            current_size = os.path.getsize(target_exe)
-
-            # 1. Comprobar Content-Length remoto del ejecutable
-            head_resp = requests.head(RAW_EXE_URL, timeout=8)
-            if head_resp.status_code == 200:
-                remote_size = int(head_resp.headers.get("Content-Length", 0))
-                # Si el archivo remoto tiene tamaño válido y difiere del local
-                if remote_size > 15_000_000 and abs(remote_size - current_size) > 1024:
-                    return True, remote_size, "Actualización disponible por tamaño de ejecutable"
-
-            # 2. Comprobar version.json
-            v_resp = requests.get(RAW_VERSION_URL, timeout=8)
+            # Comprobar version.json remoto con parámetro anti-caché
+            cache_buster = f"?t={int(time.time())}"
+            v_resp = requests.get(RAW_VERSION_URL + cache_buster, timeout=6)
             if v_resp.status_code == 200:
                 v_data = v_resp.json()
-                remote_ver = v_data.get("version", "")
-                if remote_ver and remote_ver != self.current_version:
-                    return True, 0, f"Nueva versión {remote_ver} disponible"
+                remote_ver = str(v_data.get("version", "")).strip()
+                if remote_ver and is_remote_version_newer(self.current_version, remote_ver):
+                    return True, remote_ver, f"Nueva versión v{remote_ver} disponible"
 
         except Exception as e:
-            print(f"[GitUpdater] Error al comprobar actualización de ejecutable: {e}")
+            print(f"[GitUpdater] Error al comprobar versión en GitHub: {e}")
 
-        return False, 0, ""
+        return False, "", "Al día"
 
     def download_and_prepare_exe_update(self, on_status_callback=None):
         """
-        Descarga la nueva versión de Lanzador.exe desde GitHub y genera el script de reinicio batch.
-        Retorna (exito, nuevo_exe_path, bat_path, mensaje).
+        Descarga la nueva versión de Lanzador.exe desde GitHub y genera el script de reinicio silencioso en PowerShell.
+        Retorna (exito, nuevo_exe_path, runner_path, mensaje).
         """
         try:
             if on_status_callback:
@@ -164,8 +196,9 @@ class GitUpdater:
             update_dir = get_app_data_dir()
             new_exe_path = os.path.join(update_dir, "Lanzador_update.exe")
 
-            # Descarga por fragmentos con reporte de porcentaje
-            resp = requests.get(RAW_EXE_URL, stream=True, timeout=60)
+            # Descarga con parámetro anti-caché y reporte de porcentaje
+            cache_buster = f"?t={int(time.time())}"
+            resp = requests.get(RAW_EXE_URL + cache_buster, stream=True, timeout=90)
             if resp.status_code != 200:
                 return False, None, None, f"Error HTTP {resp.status_code} al descargar ejecutable."
 
@@ -179,7 +212,7 @@ class GitUpdater:
                         downloaded += len(chunk)
                         if total_size > 0 and on_status_callback:
                             pct = int((downloaded / total_size) * 100)
-                            on_status_callback(f"Descargando actualización del Lanzador ({pct}%)...")
+                            on_status_callback(f"Descargando actualización ({pct}%)...")
 
             # Validación del ejecutable descargado
             if not os.path.isfile(new_exe_path) or os.path.getsize(new_exe_path) < 15_000_000:
@@ -198,44 +231,47 @@ class GitUpdater:
                         pass
                     return False, None, None, "El archivo descargado no es un ejecutable PE válido."
 
-            # Crear script batch de reemplazo seguro en Windows
-            bat_path = os.path.join(update_dir, "apply_update.bat")
-            bat_content = """@echo off
-setlocal enabledelayedexpansion
-set "PID=%~1"
-set "NEW_EXE=%~2"
-set "TARGET_EXE=%~3"
-
-:: Esperar a que el proceso anterior cierre
-set /a attempts=0
-:WAIT_PID
-tasklist /fi "PID eq !PID!" 2>nul | findstr /i "!PID!" >nul
-if not errorlevel 1 (
-    timeout /t 1 /nobreak >nul
-    set /a attempts+=1
-    if !attempts! leq 35 goto WAIT_PID
-)
-timeout /t 1 /nobreak >nul
-
-:: Reemplazar el ejecutable antiguo por el nuevo
-copy /y "!NEW_EXE!" "!TARGET_EXE!" >nul
-if errorlevel 1 (
-    del /f /q "!TARGET_EXE!.old" 2>nul
-    move /y "!TARGET_EXE!" "!TARGET_EXE!.old" >nul
-    copy /y "!NEW_EXE!" "!TARGET_EXE!" >nul
+            # Crear script PowerShell de reemplazo 100% silencioso (sin ventanas negras de consola)
+            ps1_path = os.path.join(update_dir, "apply_update.ps1")
+            ps1_content = """param(
+    [int]$pid_wait,
+    [string]$new_exe,
+    [string]$target_exe
 )
 
-:: Limpiar archivo temporal de descarga
-del /f /q "!NEW_EXE!" 2>nul
+$attempts = 0
+while ($attempts -lt 30) {
+    $proc = Get-Process -Id $pid_wait -ErrorAction SilentlyContinue
+    if (-not $proc) { break }
+    Start-Sleep -Seconds 1
+    $attempts++
+}
+Start-Sleep -Seconds 1
 
-:: Iniciar el ejecutable actualizado
-start "" "!TARGET_EXE!"
+$copied = $false
+for ($i = 0; $i -lt 15; $i++) {
+    try {
+        Copy-Item -Path $new_exe -Destination $target_exe -Force -ErrorAction Stop
+        $copied = $true
+        break
+    } catch {
+        Start-Sleep -Seconds 1
+    }
+}
 
-:: Eliminar este script batch
-(goto) 2>nul & del /f /q "%~f0"
+if ($copied) {
+    Remove-Item -Path $new_exe -Force -ErrorAction SilentlyContinue
+}
+
+Start-Process -FilePath $target_exe
 """
-            with open(bat_path, "w", encoding="utf-8") as f:
-                f.write(bat_content)
+            with open(ps1_path, "w", encoding="utf-8") as f:
+                f.write(ps1_content)
+
+            return True, new_exe_path, ps1_path, "Actualización lista para aplicar."
+
+        except Exception as e:
+            return False, None, None, f"Error al preparar actualización: {e}"
 
             return True, new_exe_path, bat_path, "Actualización lista para aplicar."
 
@@ -388,15 +424,17 @@ start "" "!TARGET_EXE!"
         if self.is_frozen:
             if on_status_callback:
                 on_status_callback("Comprobando versión del ejecutable...")
-            needs_exe_up, _, _ = self.check_exe_update_needed()
+            needs_exe_up, remote_ver, _ = self.check_exe_update_needed()
             if needs_exe_up:
-                ok_down, new_exe, bat_file, down_msg = self.download_and_prepare_exe_update(on_status_callback=on_status_callback)
+                ok_down, new_exe, runner_file, down_msg = self.download_and_prepare_exe_update(on_status_callback=on_status_callback)
                 if ok_down:
                     result["has_changes"] = True
                     result["exe_update_ready"] = True
                     result["new_exe_path"] = new_exe
-                    result["bat_path"] = bat_file
-                    result["message"] = "[OK] Nueva versión de Lanzador.exe lista para reiniciar."
+                    result["runner_path"] = runner_file
+                    result["bat_path"] = runner_file
+                    result["remote_version"] = remote_ver
+                    result["message"] = f"[OK] Nueva versión v{remote_ver} de Lanzador.exe lista."
                     return result
 
         # 2. Sincronizar módulos (Git o HTTP)
