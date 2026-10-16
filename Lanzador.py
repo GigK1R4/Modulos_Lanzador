@@ -93,6 +93,14 @@ DEFAULT_CONFIG = {
             "script": "FORMATO VINCULACION.py",
             "description": "Generación masiva de formatos de vinculación FV y exportación a PDF",
             "enabled_by_default": False
+        },
+        {
+            "id": "compresor_pdf",
+            "name": "Compresor PDF",
+            "title": "COMPRIMIR\nPDF",
+            "script": "Compresor_pdf.py",
+            "description": "Optimización y compresión de archivos PDF con Ghostscript",
+            "enabled_by_default": False
         }
     ],
     "theme": {

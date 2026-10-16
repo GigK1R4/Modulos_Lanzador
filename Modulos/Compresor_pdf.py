@@ -1,42 +1,87 @@
+"""
+=============================================================================
+COMPRESOR DE DOCUMENTOS PDF (MODERNO - CUSTOMTKINTER)
+=============================================================================
+Permite optimizar y reducir el tamaño de archivos PDF utilizando Ghostscript
+con diferentes niveles de compresión/calidad (Pantalla, Ebook, Impresión, etc.).
+Diseñado con CustomTkinter para ejecutarse dentro de la ventana del Lanzador
+o de forma independiente.
+"""
 import os
 import sys
+import glob
 import shutil
 import subprocess
+import threading
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
+import customtkinter as ctk
 
-
+# Opciones de compresión soportadas por Ghostscript
 QUALITY_PRESETS = {
-    "Pantalla (screen) - más pequeño / menor calidad": "/screen",
-    "Ebook (ebook) - balanceado": "/ebook",
-    "Impresora (printer) - mejor calidad": "/printer",
-    "Preprensa (prepress) - máxima calidad": "/prepress",
-    "Default (default) - estándar": "/default",
+    "Ebook (150 dpi) - Balanceado [Recomendado]": "/ebook",
+    "Pantalla (72 dpi) - Menor tamaño / máxima compresión": "/screen",
+    "Impresora (300 dpi) - Alta calidad de impresión": "/printer",
+    "Preprensa (300 dpi) - Calidad profesional": "/prepress",
+    "Estándar (default) - Calidad general": "/default",
 }
 
 
-def default_gs_command():
+def resource_path(relative_path: str) -> str:
+    """Ruta correcta para archivos incluidos con PyInstaller o ejecución directa"""
+    try:
+        base_path = sys._MEIPASS  # type: ignore[attr-defined]
+    except Exception:
+        base_path = os.path.dirname(os.path.abspath(__file__))
+    return os.path.join(base_path, relative_path)
+
+
+def default_gs_command() -> str:
     """
-    Devuelve el ejecutable de Ghostscript típico según el SO.
-    - Windows: gswin64c.exe o gswin32c.exe
-    - Linux/macOS: gs
+    Busca inteligentemente el ejecutable de Ghostscript en el sistema:
+    1. En el PATH del sistema (gswin64c.exe, gswin32c.exe, gs.exe, gs).
+    2. En rutas estándar de instalación en Windows (C:\\Program Files\\gs\\...\\bin).
     """
     if os.name == "nt":
+        # 1. Probar en PATH
         for exe in ("gswin64c.exe", "gswin32c.exe", "gs.exe"):
-            if shutil.which(exe):
-                return exe
-        return "gswin64c.exe"  # fallback
+            found = shutil.which(exe)
+            if found:
+                return found
+
+        # 2. Buscar en Program Files
+        search_patterns = [
+            r"C:\Program Files\gs\gs*\bin\gswin64c.exe",
+            r"C:\Program Files (x86)\gs\gs*\bin\gswin32c.exe",
+            r"C:\Program Files\gs\*\bin\*.exe",
+        ]
+        for pat in search_patterns:
+            matches = glob.glob(pat)
+            if matches:
+                # Priorizar ejecutables de consola (*c.exe)
+                console_exes = [m for m in matches if m.lower().endswith("c.exe")]
+                return console_exes[0] if console_exes else matches[0]
+
+        return "gswin64c.exe"  # Fallback
     else:
+        for exe in ("gs", "ghostscript"):
+            found = shutil.which(exe)
+            if found:
+                return found
         return "gs"
 
 
-def run_ghostscript(gs_exe, input_pdf, output_pdf, preset):
+def format_file_size(size_bytes: int) -> str:
+    """Formatea bytes a formato legible KB o MB"""
+    if size_bytes < 1024 * 1024:
+        return f"{size_bytes / 1024:.1f} KB"
+    return f"{size_bytes / (1024 * 1024):.2f} MB"
+
+
+def run_ghostscript(gs_exe: str, input_pdf: str, output_pdf: str, preset: str):
     """
-    Ejecuta Ghostscript para comprimir.
+    Ejecuta Ghostscript con parámetros de optimización para comprimir el archivo PDF.
     """
-    # Ghostscript requiere -dSAFER para modo seguro
-    # -dCompatibilityLevel=1.4 suele funcionar bien para compresión general
-    # -dPDFSETTINGS define el preset de calidad/tamaño
     cmd = [
         gs_exe,
         "-sDEVICE=pdfwrite",
@@ -53,11 +98,10 @@ def run_ghostscript(gs_exe, input_pdf, output_pdf, preset):
         input_pdf,
     ]
 
-    # En Windows, ocultar ventana de consola
     creationflags = 0
     startupinfo = None
     if os.name == "nt":
-        creationflags = subprocess.CREATE_NO_WINDOW
+        creationflags = getattr(subprocess, "CREATE_NO_WINDOW", 0x08000000)
         startupinfo = subprocess.STARTUPINFO()
         startupinfo.dwFlags |= subprocess.STARTF_USESHOWWINDOW
 
@@ -71,213 +115,531 @@ def run_ghostscript(gs_exe, input_pdf, output_pdf, preset):
     )
     return proc.returncode, proc.stdout, proc.stderr, cmd
 
-def resource_path(relative_path):
+
+class PDFCompressorView(ctk.CTkFrame):
     """
-    Obtiene la ruta correcta tanto en modo script como en .exe (PyInstaller)
+    Vista modular para el Compresor de PDF integrada con CustomTkinter.
     """
-    try:
-        base_path = sys._MEIPASS  # cuando es .exe
-    except Exception:
-        base_path = os.path.abspath(".")
-    return os.path.join(base_path, relative_path)
+    preferred_size = (1040, 700)
+    min_size = (880, 580)
 
-class PDFCompressorGUI:
-    def __init__(self, root):
-        self.root = root
-        icon_path = resource_path("pdf.ico")
-        root.iconbitmap(icon_path)
-        self.root.title("Compresor de PDF (Ghostscript)")
-        self.root.geometry("760x340")
+    def __init__(self, parent, on_back=None, *args, **kwargs):
+        super().__init__(parent, fg_color="transparent", *args, **kwargs)
+        self.on_back = on_back
 
-        self.gs_path = tk.StringVar(value=default_gs_command())
-        self.in_path = tk.StringVar(value="")
-        self.out_path = tk.StringVar(value="")
-        self.quality_label = tk.StringVar(value=list(QUALITY_PRESETS.keys())[1])  # ebook por defecto
+        self.gs_path_var = tk.StringVar(value=default_gs_command())
+        self.in_path_var = tk.StringVar(value="")
+        self.out_path_var = tk.StringVar(value="")
+        self.quality_key_var = tk.StringVar(value=list(QUALITY_PRESETS.keys())[0])
 
-        frm = tk.Frame(root, padx=12, pady=12)
-        frm.pack(fill="both", expand=True)
+        self.is_compressing = False
+        self._build_ui()
 
-        # Ghostscript path
-        tk.Label(frm, text="Ghostscript (ejecutable):").grid(row=0, column=0, sticky="w")
-        tk.Entry(frm, textvariable=self.gs_path, width=58).grid(row=0, column=1, sticky="we", padx=8)
-        tk.Button(frm, text="Buscar...", command=self.pick_gs).grid(row=0, column=2, sticky="e")
+    def safe_after(self, ms, callback):
+        try:
+            if self.winfo_exists():
+                self.after(ms, callback)
+        except Exception:
+            pass
 
-        # Input
-        tk.Label(frm, text="PDF de entrada:").grid(row=1, column=0, sticky="w", pady=(10, 0))
-        tk.Entry(frm, textvariable=self.in_path, width=58).grid(row=1, column=1, sticky="we", padx=8, pady=(10, 0))
-        tk.Button(frm, text="Seleccionar...", command=self.pick_input).grid(row=1, column=2, sticky="e", pady=(10, 0))
+    def _build_ui(self):
+        # 1. Barra superior con botón volver
+        top_bar = ctk.CTkFrame(self, fg_color="transparent")
+        top_bar.pack(fill="x", padx=25, pady=(15, 6))
 
-        # Output
-        tk.Label(frm, text="PDF comprimido (salida):").grid(row=2, column=0, sticky="w", pady=(10, 0))
-        tk.Entry(frm, textvariable=self.out_path, width=58).grid(row=2, column=1, sticky="we", padx=8, pady=(10, 0))
-        tk.Button(frm, text="Guardar como...", command=self.pick_output).grid(row=2, column=2, sticky="e", pady=(10, 0))
+        if self.on_back:
+            btn_back = ctk.CTkButton(
+                top_bar,
+                text="← Volver al Menú Principal",
+                font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+                width=190,
+                height=32,
+                corner_radius=8,
+                fg_color="#182c47",
+                hover_color="#243f63",
+                text_color="#94a3b8",
+                command=self.on_back
+            )
+            btn_back.pack(side="left")
 
-        # Quality preset
-        tk.Label(frm, text="Nivel de compresión/calidad:").grid(row=3, column=0, sticky="w", pady=(12, 0))
-        self.quality_combo = ttk.Combobox(
-            frm,
+        # 2. Tarjeta de Cabecera
+        header_card = ctk.CTkFrame(
+            self,
+            fg_color="#0e1f38",
+            border_width=1,
+            border_color="#1a3557",
+            corner_radius=14
+        )
+        header_card.pack(fill="x", padx=25, pady=(4, 12))
+
+        lbl_title = ctk.CTkLabel(
+            header_card,
+            text="COMPRESOR DE DOCUMENTOS PDF",
+            font=ctk.CTkFont(family="Segoe UI", size=20, weight="bold"),
+            text_color="#ffffff"
+        )
+        lbl_title.pack(anchor="w", padx=20, pady=(12, 2))
+
+        lbl_sub = ctk.CTkLabel(
+            header_card,
+            text="Reduzca el peso de sus archivos PDF sin perder legibilidad seleccionando el nivel de calidad deseado.",
+            font=ctk.CTkFont(family="Segoe UI", size=13),
+            text_color="#8ea3bf"
+        )
+        lbl_sub.pack(anchor="w", padx=20, pady=(0, 12))
+
+        # 3. Contenedor central (2 Columnas: Archivos y Parámetros)
+        center_frame = ctk.CTkFrame(self, fg_color="transparent")
+        center_frame.pack(fill="both", expand=True, padx=25, pady=(0, 10))
+
+        # --- Columna Izquierda: Selección de Archivos ---
+        left_card = ctk.CTkFrame(
+            center_frame,
+            fg_color="#0e1f38",
+            border_width=1,
+            border_color="#1a3557",
+            corner_radius=14
+        )
+        left_card.pack(side="left", fill="both", expand=True, padx=(0, 8))
+
+        lbl_sec1 = ctk.CTkLabel(
+            left_card,
+            text="1. Archivos PDF",
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            text_color="#00b4d8"
+        )
+        lbl_sec1.pack(anchor="w", padx=18, pady=(12, 8))
+
+        # Archivo Entrada
+        btn_in = ctk.CTkButton(
+            left_card,
+            text="📄 Seleccionar Archivo PDF de Entrada",
+            font=ctk.CTkFont(family="Segoe UI", size=12, weight="bold"),
+            fg_color="#182c47",
+            hover_color="#243f63",
+            text_color="#38bdf8",
+            height=34,
+            corner_radius=8,
+            command=self.select_input_pdf
+        )
+        btn_in.pack(fill="x", padx=18, pady=(2, 2))
+
+        self.lbl_in_status = ctk.CTkLabel(
+            left_card,
+            text="Ningún PDF seleccionado",
+            font=ctk.CTkFont(size=11),
+            text_color="#64748b"
+        )
+        self.lbl_in_status.pack(anchor="w", padx=22, pady=(0, 10))
+
+        # Archivo Salida
+        btn_out = ctk.CTkButton(
+            left_card,
+            text="💾 Guardar PDF Comprimido Como...",
+            font=ctk.CTkFont(family="Segoe UI", size=12),
+            fg_color="#10253f",
+            hover_color="#18365c",
+            text_color="#e2e8f0",
+            height=34,
+            corner_radius=8,
+            command=self.select_output_pdf
+        )
+        btn_out.pack(fill="x", padx=18, pady=(2, 2))
+
+        self.lbl_out_status = ctk.CTkLabel(
+            left_card,
+            text="Destino: (se sugerirá automáticamente)",
+            font=ctk.CTkFont(size=11),
+            text_color="#64748b"
+        )
+        self.lbl_out_status.pack(anchor="w", padx=22, pady=(0, 12))
+
+        # Motor Ghostscript
+        lbl_gs = ctk.CTkLabel(
+            left_card,
+            text="Motor Ghostscript detectado:",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#94a3b8"
+        )
+        lbl_gs.pack(anchor="w", padx=18, pady=(2, 2))
+
+        gs_row = ctk.CTkFrame(left_card, fg_color="transparent")
+        gs_row.pack(fill="x", padx=18, pady=(0, 10))
+
+        self.entry_gs = ctk.CTkEntry(
+            gs_row,
+            textvariable=self.gs_path_var,
+            font=ctk.CTkFont(family="Consolas", size=11),
+            height=32,
+            fg_color="#071426",
+            border_color="#1d3b61",
+            text_color="#e2e8f0"
+        )
+        self.entry_gs.pack(side="left", fill="x", expand=True, padx=(0, 6))
+
+        btn_pick_gs = ctk.CTkButton(
+            gs_row,
+            text="Buscar...",
+            width=80,
+            height=32,
+            fg_color="#182c47",
+            hover_color="#243f63",
+            text_color="#38bdf8",
+            command=self.select_gs_exe
+        )
+        btn_pick_gs.pack(side="left")
+
+        # --- Columna Derecha: Configuración y Ejecución ---
+        right_card = ctk.CTkFrame(
+            center_frame,
+            fg_color="#0e1f38",
+            border_width=1,
+            border_color="#1a3557",
+            corner_radius=14
+        )
+        right_card.pack(side="left", fill="both", expand=True, padx=(8, 0))
+
+        lbl_sec2 = ctk.CTkLabel(
+            right_card,
+            text="2. Nivel de Compresión y Opciones",
+            font=ctk.CTkFont(family="Segoe UI", size=15, weight="bold"),
+            text_color="#00b4d8"
+        )
+        lbl_sec2.pack(anchor="w", padx=18, pady=(12, 8))
+
+        lbl_preset = ctk.CTkLabel(
+            right_card,
+            text="Nivel de Calidad / Compresión:",
+            font=ctk.CTkFont(size=12, weight="bold"),
+            text_color="#94a3b8"
+        )
+        lbl_preset.pack(anchor="w", padx=18, pady=(2, 2))
+
+        self.cb_preset = ctk.CTkComboBox(
+            right_card,
             values=list(QUALITY_PRESETS.keys()),
-            textvariable=self.quality_label,
-            state="readonly",
-            width=55,
+            variable=self.quality_key_var,
+            height=34,
+            corner_radius=8,
+            fg_color="#071426",
+            border_color="#1d3b61",
+            text_color="#ffffff",
+            button_color="#182c47",
+            button_hover_color="#243f63"
         )
-        self.quality_combo.grid(row=3, column=1, sticky="w", padx=8, pady=(12, 0))
+        self.cb_preset.pack(fill="x", padx=18, pady=(0, 15))
 
-        # Buttons
-        btns = tk.Frame(frm)
-        btns.grid(row=4, column=0, columnspan=3, sticky="w", pady=(16, 0))
+        # Información comparativa rápida
+        self.info_box = ctk.CTkFrame(right_card, fg_color="#071426", corner_radius=8, border_width=1, border_color="#1d3b61")
+        self.info_box.pack(fill="x", padx=18, pady=(0, 15))
 
-        tk.Button(btns, text="Comprimir", command=self.compress).pack(side="left")
-        tk.Button(btns, text="Limpiar", command=self.clear).pack(side="left", padx=10)
-        tk.Button(btns, text="Salir", command=root.quit).pack(side="left")
-
-        # Status + log
-        self.status = tk.StringVar(value="Listo.")
-        tk.Label(frm, textvariable=self.status, anchor="w").grid(row=5, column=0, columnspan=3, sticky="we", pady=(12, 4))
-
-        self.log = tk.Text(frm, height=8, wrap="word")
-        self.log.grid(row=6, column=0, columnspan=3, sticky="nsew")
-
-        frm.columnconfigure(1, weight=1)
-        frm.rowconfigure(6, weight=1)
-
-    def write_log(self, text):
-        self.log.insert("end", text + "\n")
-        self.log.see("end")
-
-    def pick_gs(self):
-        path = filedialog.askopenfilename(
-            title="Selecciona el ejecutable de Ghostscript",
-            filetypes=[("Ejecutable", "*.exe" if os.name == "nt" else "*")],
+        self.lbl_info_original = ctk.CTkLabel(
+            self.info_box,
+            text="Tamaño Original: --",
+            font=ctk.CTkFont(size=12),
+            text_color="#94a3b8"
         )
-        if path:
-            self.gs_path.set(path)
+        self.lbl_info_original.pack(anchor="w", padx=14, pady=(8, 2))
 
-    def pick_input(self):
-        path = filedialog.askopenfilename(
-            title="Selecciona PDF de entrada",
-            filetypes=[("PDF", "*.pdf")],
+        self.lbl_info_result = ctk.CTkLabel(
+            self.info_box,
+            text="Tamaño Comprimido: --",
+            font=ctk.CTkFont(size=12),
+            text_color="#94a3b8"
         )
-        if not path:
-            return
-        self.in_path.set(path)
+        self.lbl_info_result.pack(anchor="w", padx=14, pady=(2, 8))
 
-        # Sugerir salida automática
-        base, ext = os.path.splitext(path)
-        suggested = base + "_comprimido.pdf"
-        if not self.out_path.get():
-            self.out_path.set(suggested)
+        # Botón de acción principal
+        self.btn_compress = ctk.CTkButton(
+            right_card,
+            text="⚡ INICIAR COMPRESIÓN",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            fg_color="#00b4d8",
+            hover_color="#0096c7",
+            text_color="#02293f",
+            height=38,
+            corner_radius=8,
+            command=self.start_compression_thread
+        )
+        self.btn_compress.pack(fill="x", padx=18, pady=(6, 8))
 
-    def pick_output(self):
-        path = filedialog.asksaveasfilename(
-            title="Guardar PDF comprimido como",
+        # Botón de limpiar
+        btn_clear = ctk.CTkButton(
+            right_card,
+            text="Limpiar Campos",
+            font=ctk.CTkFont(size=12),
+            fg_color="transparent",
+            hover_color="#182c47",
+            text_color="#94a3b8",
+            height=28,
+            command=self.clear_fields
+        )
+        btn_clear.pack(anchor="center", pady=(0, 4))
+
+        # 4. Sección Inferior: Barra de Progreso y Consola de Registro
+        bottom_frame = ctk.CTkFrame(
+            self,
+            fg_color="#0e1f38",
+            border_width=1,
+            border_color="#1a3557",
+            corner_radius=14
+        )
+        bottom_frame.pack(fill="x", padx=25, pady=(0, 14))
+
+        prog_header = ctk.CTkFrame(bottom_frame, fg_color="transparent")
+        prog_header.pack(fill="x", padx=18, pady=(10, 4))
+
+        self.lbl_prog_title = ctk.CTkLabel(
+            prog_header,
+            text="Registro de Optimización",
+            font=ctk.CTkFont(family="Segoe UI", size=13, weight="bold"),
+            text_color="#38bdf8"
+        )
+        self.lbl_prog_title.pack(side="left")
+
+        self.lbl_progress = ctk.CTkLabel(
+            prog_header,
+            text="Listo para comprimir",
+            font=ctk.CTkFont(size=12),
+            text_color="#94a3b8"
+        )
+        self.lbl_progress.pack(side="right")
+
+        self.progress_bar = ctk.CTkProgressBar(
+            bottom_frame,
+            height=8,
+            corner_radius=4,
+            progress_color="#00b4d8",
+            fg_color="#182c47"
+        )
+        self.progress_bar.pack(fill="x", padx=18, pady=(0, 8))
+        self.progress_bar.set(0.0)
+
+        self.log_textbox = ctk.CTkTextbox(
+            bottom_frame,
+            height=110,
+            corner_radius=8,
+            fg_color="#071426",
+            border_color="#1d3b61",
+            border_width=1,
+            text_color="#e2e8f0",
+            font=ctk.CTkFont(family="Consolas", size=11)
+        )
+        self.log_textbox.pack(fill="x", padx=18, pady=(0, 12))
+
+    def log(self, message: str):
+        def _append():
+            self.log_textbox.insert("end", f"{message}\n")
+            self.log_textbox.see("end")
+        self.safe_after(0, _append)
+
+    def select_input_pdf(self):
+        f = filedialog.askopenfilename(
+            title="Seleccionar archivo PDF para comprimir",
+            filetypes=[("Archivos PDF", "*.pdf"), ("Todos los archivos", "*.*")]
+        )
+        if f:
+            self.in_path_var.set(f)
+            fname = os.path.basename(f)
+            size_bytes = os.path.getsize(f)
+            size_str = format_file_size(size_bytes)
+            self.lbl_in_status.configure(text=f"✓ {fname} ({size_str})", text_color="#4ade80")
+            self.lbl_info_original.configure(text=f"Tamaño Original: {size_str}")
+
+            # Sugerir salida automáticamente si no está establecida
+            base, ext = os.path.splitext(f)
+            suggested = f"{base}_comprimido.pdf"
+            self.out_path_var.set(suggested)
+            self.lbl_out_status.configure(text=f"✓ {os.path.basename(suggested)}", text_color="#38bdf8")
+
+    def select_output_pdf(self):
+        f = filedialog.asksaveasfilename(
+            title="Guardar archivo PDF comprimido como",
             defaultextension=".pdf",
-            filetypes=[("PDF", "*.pdf")],
+            filetypes=[("Archivos PDF", "*.pdf")]
         )
-        if path:
-            self.out_path.set(path)
+        if f:
+            self.out_path_var.set(f)
+            self.lbl_out_status.configure(text=f"✓ {os.path.basename(f)}", text_color="#4ade80")
 
-    def clear(self):
-        self.in_path.set("")
-        self.out_path.set("")
-        self.quality_label.set(list(QUALITY_PRESETS.keys())[1])
-        self.status.set("Listo.")
-        self.log.delete("1.0", "end")
+    def select_gs_exe(self):
+        f = filedialog.askopenfilename(
+            title="Seleccionar ejecutable de Ghostscript",
+            filetypes=[("Ejecutables", "*.exe" if os.name == "nt" else "*"), ("Todos", "*.*")]
+        )
+        if f:
+            self.gs_path_var.set(f)
 
-    def compress(self):
-        gs_exe = self.gs_path.get().strip()
-        in_pdf = self.in_path.get().strip()
-        out_pdf = self.out_path.get().strip()
-        preset = QUALITY_PRESETS.get(self.quality_label.get(), "/ebook")
+    def clear_fields(self):
+        self.in_path_var.set("")
+        self.out_path_var.set("")
+        self.lbl_in_status.configure(text="Ningún PDF seleccionado", text_color="#64748b")
+        self.lbl_out_status.configure(text="Destino: (se sugerirá automáticamente)", text_color="#64748b")
+        self.lbl_info_original.configure(text="Tamaño Original: --")
+        self.lbl_info_result.configure(text="Tamaño Comprimido: --")
+        self.progress_bar.set(0.0)
+        self.lbl_progress.configure(text="Listo para comprimir", text_color="#94a3b8")
+        self.log_textbox.delete("1.0", "end")
 
-        # Validaciones
+    def start_compression_thread(self):
+        if self.is_compressing:
+            return
+
+        in_pdf = self.in_path_var.get().strip()
+        out_pdf = self.out_path_var.get().strip()
+        gs_exe = self.gs_path_var.get().strip()
+
         if not in_pdf or not os.path.isfile(in_pdf):
-            messagebox.showerror("Error", "Selecciona un PDF de entrada válido.")
+            messagebox.showwarning("Atención", "Por favor seleccione un archivo PDF de entrada válido.")
             return
 
         if not out_pdf:
-            messagebox.showerror("Error", "Selecciona el archivo de salida.")
+            messagebox.showwarning("Atención", "Por favor defina la ruta del archivo PDF de salida.")
             return
 
-        # Resolver ejecutable: si no es ruta, intentar por PATH
-        gs_resolved = gs_exe
-        if os.path.sep not in gs_exe and (os.name != "nt" or not gs_exe.lower().endswith(".exe")):
-            # Puede ser 'gs' en linux/mac
-            pass
-
-        if os.path.isfile(gs_exe):
-            gs_resolved = gs_exe
-        else:
+        # Resolver ejecutable de Ghostscript
+        resolved_gs = gs_exe
+        if not os.path.isfile(resolved_gs):
             found = shutil.which(gs_exe)
             if found:
-                gs_resolved = found
+                resolved_gs = found
+            else:
+                resolved_gs = default_gs_command()
 
-        if not gs_resolved or (not os.path.isfile(gs_resolved) and not shutil.which(gs_exe)):
+        if not os.path.isfile(resolved_gs) and not shutil.which(resolved_gs):
             messagebox.showerror(
                 "Ghostscript no encontrado",
-                "No se encontró Ghostscript.\n\n"
-                "Solución:\n"
-                "- Instala Ghostscript y asegúrate que esté en el PATH, o\n"
-                "- Usa el botón 'Buscar...' para seleccionar el ejecutable (gs / gswin64c.exe)."
+                "No se pudo encontrar el motor de compresión Ghostscript.\n\n"
+                "Verifique que esté instalado en su equipo o use el botón 'Buscar...' "
+                "para seleccionar gswin64c.exe."
             )
             return
 
-        # Ejecutar
+        self.is_compressing = True
+        self.btn_compress.configure(state="disabled", text="⏳ COMPRIMIENDO...", fg_color="#182c47", text_color="#94a3b8")
+        self.progress_bar.set(0.4)
+        self.lbl_progress.configure(text="Comprimiendo PDF...", text_color="#38bdf8")
+
+        preset_key = self.quality_key_var.get()
+        preset = QUALITY_PRESETS.get(preset_key, "/ebook")
+
+        threading.Thread(
+            target=self._run_compression,
+            args=(resolved_gs, in_pdf, out_pdf, preset, preset_key),
+            daemon=True
+        ).start()
+
+    def _reset_btn(self):
+        self.is_compressing = False
+        self.btn_compress.configure(
+            state="normal",
+            text="⚡ INICIAR COMPRESIÓN",
+            fg_color="#00b4d8",
+            text_color="#02293f"
+        )
+
+    def _run_compression(self, gs_exe, in_pdf, out_pdf, preset, preset_name):
         try:
-            self.status.set("Comprimiendo... (esto puede tardar)")
-            self.root.update_idletasks()
+            self.log("=" * 60)
+            self.log(f"🚀 Iniciando compresión de: {os.path.basename(in_pdf)}")
+            self.log(f"⚙️ Nivel seleccionado: {preset_name} ({preset})")
+            self.log(f"🔧 Ghostscript: {gs_exe}")
 
-            # Tamaños para comparar
             in_size = os.path.getsize(in_pdf)
-
-            code, out, err, cmd = run_ghostscript(gs_resolved, in_pdf, out_pdf, preset)
-
-            self.write_log("Comando ejecutado:")
-            self.write_log(" ".join(cmd))
-            self.write_log("")
+            code, out, err, cmd = run_ghostscript(gs_exe, in_pdf, out_pdf, preset)
 
             if code != 0:
-                self.write_log("ERROR (stderr):")
-                self.write_log(err.strip() or "(sin salida)")
-                self.status.set("Falló la compresión.")
-                messagebox.showerror("Error", f"Ghostscript falló.\n\nDetalles:\n{err.strip() or 'Sin detalles'}")
+                self.log(f"❌ Error al ejecutar Ghostscript (código {code}):")
+                self.log(err.strip() or "(sin mensaje de error)")
+                self.safe_after(0, self._reset_btn)
+                self.safe_after(0, lambda: self.lbl_progress.configure(text="Falló la compresión", text_color="#f87171"))
+                self.safe_after(0, lambda: messagebox.showerror("Error", f"Ghostscript falló al comprimir:\n{err.strip()}"))
                 return
 
-            # Verificar salida
             if not os.path.isfile(out_pdf):
-                self.status.set("No se generó el archivo de salida.")
-                messagebox.showerror("Error", "No se generó el PDF de salida.")
+                self.log("❌ No se encontró el archivo de salida tras la compresión.")
+                self.safe_after(0, self._reset_btn)
+                self.safe_after(0, lambda: self.lbl_progress.configure(text="Error al generar salida", text_color="#f87171"))
                 return
 
             out_size = os.path.getsize(out_pdf)
-            reduction = (1 - (out_size / in_size)) * 100 if in_size > 0 else 0
+            reduction = ((in_size - out_size) / in_size) * 100 if in_size > 0 else 0
 
-            self.write_log("OK.")
-            self.write_log(f"Tamaño original: {in_size/1024:.1f} KB")
-            self.write_log(f"Tamaño comprimido: {out_size/1024:.1f} KB")
-            self.write_log(f"Reducción aproximada: {reduction:.1f}%")
-
-            self.status.set("Listo. PDF comprimido creado.")
-            messagebox.showinfo(
-                "Éxito",
-                f"PDF comprimido creado:\n{os.path.abspath(out_pdf)}\n\n"
-                f"Original: {in_size/1024:.1f} KB\n"
-                f"Comprimido: {out_size/1024:.1f} KB\n"
-                f"Reducción: {reduction:.1f}%"
-            )
+            self.safe_after(0, lambda: self._on_success(in_size, out_size, reduction, out_pdf))
 
         except Exception as e:
-            self.status.set("Error.")
-            messagebox.showerror("Error", f"Ocurrió un problema:\n{e}")
+            self.log(f"❌ Error inesperado: {str(e)}")
+            self.safe_after(0, self._reset_btn)
+            self.safe_after(0, lambda: messagebox.showerror("Error", f"Ocurrió un error inesperado:\n{str(e)}"))
+
+    def _on_success(self, in_size, out_size, reduction, out_pdf):
+        self._reset_btn()
+        self.progress_bar.set(1.0)
+
+        in_str = format_file_size(in_size)
+        out_str = format_file_size(out_size)
+        reduc_str = f"{reduction:.1f}%" if reduction >= 0 else "0% (el archivo ya estaba optimizado)"
+
+        self.lbl_info_result.configure(text=f"Tamaño Comprimido: {out_str} ({reduc_str} reducción)")
+        self.lbl_progress.configure(
+            text=f"✓ Optimizado exitosamente ({reduc_str} de reducción)",
+            text_color="#4ade80"
+        )
+
+        self.log(f"✓ Archivo generado: {out_pdf}")
+        self.log(f"📊 Original: {in_str} -> Comprimido: {out_str} (Reducción: {reduc_str})")
+        self.log("=" * 60)
+
+        ans = messagebox.askyesno(
+            "¡Compresión Exitosa!",
+            f"El PDF se comprimió correctamente:\n\n"
+            f"• Original: {in_str}\n"
+            f"• Comprimido: {out_str}\n"
+            f"• Reducción lograda: {reduc_str}\n\n"
+            f"Ubicación:\n{out_pdf}\n\n¿Desea abrir el archivo comprimido ahora?"
+        )
+        if ans:
+            try:
+                os.startfile(out_pdf)
+            except Exception:
+                pass
+
+
+# -----------------------------------------------------------------------------
+# PUNTOS DE ENTRADA
+# -----------------------------------------------------------------------------
+def create_view(parent, on_back=None):
+    """Punto de entrada estándar para incrustar en el Lanzador"""
+    return PDFCompressorView(parent, on_back=on_back)
 
 
 def main():
-    # Ejecuta:
-    #   pip install tk
-    # Tkinter suele venir con Python en Windows/macOS, en Linux puede requerir:
-    #   sudo apt-get install python3-tk
-    root = tk.Tk()
-    app = PDFCompressorGUI(root)
+    """Ejecución independiente del compresor"""
+    ctk.set_appearance_mode("dark")
+    ctk.set_default_color_theme("blue")
+
+    root = ctk.CTk()
+    root.title("Automatización de Archivos - Compresor de PDF")
+    root.geometry("1040x700")
+    root.minsize(880, 580)
+    root.configure(fg_color="#0b1626")
+
+    # Intentar asignar icono de la aplicación si existe
+    for ico_cand in [
+        resource_path("pdf.ico"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "pdf.ico"),
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), "pdf.ico"),
+    ]:
+        if os.path.exists(ico_cand):
+            try:
+                root.iconbitmap(ico_cand)
+                break
+            except Exception:
+                pass
+
+    view = PDFCompressorView(root, on_back=root.destroy)
+    view.pack(fill="both", expand=True)
+
     root.mainloop()
 
 

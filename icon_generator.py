@@ -225,6 +225,30 @@ def create_formato_icon(path=None, size=(120, 120), color="#02293f"):
         img.save(path, format="PNG")
     return img
 
+def create_compress_icon(path=None, size=(120, 120), color="#02293f"):
+    """Icono de documento PDF con flechas de compresión hacia adentro"""
+    img = Image.new("RGBA", size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    w, h = size
+
+    # Documento PDF base
+    d.rounded_rectangle([w*0.25, h*0.14, w*0.75, h*0.86], radius=7, fill="#ffffff", outline=color, width=5)
+
+    # Flecha superior apuntando hacia abajo
+    d.line([w*0.50, h*0.24, w*0.50, h*0.44], fill=color, width=5)
+    d.polygon([(w*0.41, h*0.37), (w*0.59, h*0.37), (w*0.50, h*0.47)], fill=color)
+
+    # Flecha inferior apuntando hacia arriba
+    d.line([w*0.50, h*0.76, w*0.50, h*0.56], fill=color, width=5)
+    d.polygon([(w*0.41, h*0.63), (w*0.59, h*0.63), (w*0.50, h*0.53)], fill=color)
+
+    # Línea central de compresión
+    d.line([w*0.35, h*0.50, w*0.65, h*0.50], fill=color, width=4)
+
+    if path:
+        img.save(path, format="PNG")
+    return img
+
 def generate_all_icons(base_dir=None, save_to_disk=False):
     """
     Genera todos los iconos. Por defecto los crea en memoria (PIL Images)
@@ -238,6 +262,8 @@ def generate_all_icons(base_dir=None, save_to_disk=False):
         "formato_vinculacion": create_formato_icon(),
         "formato": create_formato_icon(),
         "vinculacion": create_formato_icon(),
+        "compresor_pdf": create_compress_icon(),
+        "compress": create_compress_icon(),
         "edit": create_edit_icon(),
         "sync": create_sync_icon(),
         "sheet": create_sheet_icon(),
@@ -254,6 +280,7 @@ def generate_all_icons(base_dir=None, save_to_disk=False):
         icons["unir_pdf"].save(os.path.join(icons_dir, "unir_pdf.png"))
         icons["doc_masivos"].save(os.path.join(icons_dir, "doc_masivos.png"))
         icons["formato_vinculacion"].save(os.path.join(icons_dir, "formato_vinculacion.png"))
+        icons["compresor_pdf"].save(os.path.join(icons_dir, "compresor_pdf.png"))
         icons["edit"].save(os.path.join(icons_dir, "edit.png"))
         icons["sync"].save(os.path.join(icons_dir, "sync.png"))
         icons["sheet"].save(os.path.join(icons_dir, "sheet.png"))
@@ -269,7 +296,9 @@ def get_icon_for_module(mod_name_or_script, icons_dict=None):
         icons_dict = generate_all_icons(save_to_disk=False)
 
     text = str(mod_name_or_script).lower()
-    if "vincula" in text or "formato" in text or "contrato" in text:
+    if "comprim" in text or "compress" in text:
+        return icons_dict.get("compresor_pdf", icons_dict["unir_pdf"])
+    elif "vincula" in text or "formato" in text or "contrato" in text:
         return icons_dict.get("formato_vinculacion", icons_dict["doc_masivos"])
     elif "unir" in text or "pdf" in text:
         return icons_dict.get("unir_pdf", icons_dict["default_script"])
