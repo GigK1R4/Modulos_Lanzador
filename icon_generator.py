@@ -249,6 +249,38 @@ def create_compress_icon(path=None, size=(120, 120), color="#02293f"):
         img.save(path, format="PNG")
     return img
 
+def create_word_pdf_icon(path=None, size=(120, 120), color="#02293f"):
+    """Icono de documento Word con 'W' y conversión a PDF"""
+    img = Image.new("RGBA", size, (0, 0, 0, 0))
+    d = ImageDraw.Draw(img)
+    w, h = size
+
+    # Hoja de documento base
+    d.rounded_rectangle([w*0.20, h*0.14, w*0.80, h*0.86], radius=7, fill="#ffffff", outline=color, width=5)
+
+    # Letra W estilizada
+    pts = [
+        (w*0.28, h*0.28),
+        (w*0.35, h*0.54),
+        (w*0.42, h*0.35),
+        (w*0.49, h*0.54),
+        (w*0.56, h*0.28)
+    ]
+    for i in range(len(pts)-1):
+        d.line([pts[i], pts[i+1]], fill=color, width=4)
+
+    # Flecha indicadora de conversión
+    d.line([w*0.30, h*0.70, w*0.55, h*0.70], fill=color, width=4)
+    d.polygon([(w*0.53, h*0.64), (w*0.65, h*0.70), (w*0.53, h*0.76)], fill=color)
+
+    # Etiqueta 'PDF'
+    d.rounded_rectangle([w*0.52, h*0.44, w*0.75, h*0.58], radius=4, fill=color)
+    d.line([w*0.56, h*0.51, w*0.71, h*0.51], fill="#ffffff", width=2)
+
+    if path:
+        img.save(path, format="PNG")
+    return img
+
 def generate_all_icons(base_dir=None, save_to_disk=False):
     """
     Genera todos los iconos. Por defecto los crea en memoria (PIL Images)
@@ -264,6 +296,8 @@ def generate_all_icons(base_dir=None, save_to_disk=False):
         "vinculacion": create_formato_icon(),
         "compresor_pdf": create_compress_icon(),
         "compress": create_compress_icon(),
+        "word_pdf": create_word_pdf_icon(),
+        "word": create_word_pdf_icon(),
         "edit": create_edit_icon(),
         "sync": create_sync_icon(),
         "sheet": create_sheet_icon(),
@@ -281,6 +315,7 @@ def generate_all_icons(base_dir=None, save_to_disk=False):
         icons["doc_masivos"].save(os.path.join(icons_dir, "doc_masivos.png"))
         icons["formato_vinculacion"].save(os.path.join(icons_dir, "formato_vinculacion.png"))
         icons["compresor_pdf"].save(os.path.join(icons_dir, "compresor_pdf.png"))
+        icons["word_pdf"].save(os.path.join(icons_dir, "word_pdf.png"))
         icons["edit"].save(os.path.join(icons_dir, "edit.png"))
         icons["sync"].save(os.path.join(icons_dir, "sync.png"))
         icons["sheet"].save(os.path.join(icons_dir, "sheet.png"))
@@ -300,9 +335,11 @@ def get_icon_for_module(mod_name_or_script, icons_dict=None):
         return icons_dict.get("compresor_pdf", icons_dict["unir_pdf"])
     elif "vincula" in text or "formato" in text or "contrato" in text:
         return icons_dict.get("formato_vinculacion", icons_dict["doc_masivos"])
-    elif "unir" in text or "pdf" in text:
+    elif "word" in text or "pds" in text:
+        return icons_dict.get("word_pdf", icons_dict.get("doc_masivos", icons_dict["default_script"]))
+    elif "unir" in text:
         return icons_dict.get("unir_pdf", icons_dict["default_script"])
-    elif "doc" in text or "gene" in text or "word" in text:
+    elif "doc" in text or "gene" in text:
         return icons_dict.get("doc_masivos", icons_dict["default_script"])
     elif "sheet" in text or "excel" in text or "tabla" in text:
         return icons_dict.get("sheet", icons_dict["default_script"])

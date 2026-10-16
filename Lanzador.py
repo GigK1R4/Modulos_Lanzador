@@ -127,6 +127,14 @@ DEFAULT_CONFIG = {
             "script": "Compresor_pdf.py",
             "description": "Optimización y compresión de archivos PDF con Ghostscript",
             "enabled_by_default": False
+        },
+        {
+            "id": "word_a_pdf",
+            "name": "Documento Word a PDF",
+            "title": "WORD\nA PDF",
+            "script": "Documento Word a PDS.py",
+            "description": "Conversión y fusión de documentos Word a PDF tamaño Carta",
+            "enabled_by_default": False
         }
     ],
     "theme": {
@@ -258,7 +266,7 @@ class LauncherApp(ctk.CTk):
         self.main_container.pack(fill="both", expand=True)
 
         # Estado de sincronización Git y versión de la aplicación
-        self.app_version = "1.0.3"
+        self.app_version = "1.0.4"
         self.git_status_text = "Git: En espera"
         self.git_status_color = "#94a3b8"
         self.git_check_in_progress = False
@@ -295,12 +303,13 @@ class LauncherApp(ctk.CTk):
             top = max(0, (nh - target_h) // 2)
             cropped = scaled.crop((left, top, left + target_w, top + target_h))
 
-            # Difuminado gaussiano suave
-            blurred = cropped.filter(ImageFilter.GaussianBlur(radius=28))
+            # Suavizado sutil para mantener los detalles y legibilidad de Logo_APP2
+            blurred = cropped.filter(ImageFilter.GaussianBlur(radius=2))
 
-            # Mezcla con el fondo azul marino corporativo #0b1626 (11, 22, 38)
+            # Mezcla elegante con el fondo azul marino corporativo #0b1626 (11, 22, 38)
+            # Permite ver con nitidez Logo_APP2 manteniendo los textos y tarjetas legibles
             dark_bg = Image.new("RGB", (target_w, target_h), (11, 22, 38))
-            blended = Image.blend(dark_bg, blurred, 0.28)
+            blended = Image.blend(dark_bg, blurred, 0.40)
 
             tk_img = ImageTk.PhotoImage(blended)
             self._bg_cache[cache_key] = tk_img
@@ -775,21 +784,30 @@ class LauncherApp(ctk.CTk):
         badge_lbl.pack()
         self.bg_canvas.create_window(w // 2, 150, window=badge_frame, tags="badge")
 
-        # 5. Contenedor de Tarjetas de Módulos
-        if total_mods <= 4:
-            cards_container = ctk.CTkFrame(self.bg_canvas, fg_color="transparent")
+        # 5. Contenedor de Tarjetas de Módulos (CTkFrame directo sin conflictos Tcl)
+        cards_container = ctk.CTkFrame(self.bg_canvas, fg_color="transparent")
+
+        # Ajuste adaptativo del ancho y espaciado de tarjeta según la cantidad de módulos
+        if total_mods >= 5:
+            card_w = 168
+            card_h = 220
+            card_pad = 7
         else:
-            cards_container = ctk.CTkScrollableFrame(
-                self.bg_canvas,
-                fg_color="transparent",
-                orientation="horizontal",
-                height=250,
-                width=min(w - 60, 960)
-            )
+            card_w = 195
+            card_h = 220
+            card_pad = 12
 
         for idx, mod in enumerate(modulos):
             tiene_permiso = self.check_module_permission(mod)
-            self.create_module_card(cards_container, mod, tiene_permiso, is_first=(idx == 0))
+            self.create_module_card(
+                cards_container,
+                mod,
+                tiene_permiso,
+                is_first=(idx == 0),
+                width=card_w,
+                height=card_h,
+                padx=card_pad
+            )
 
         self.bg_canvas.create_window(w // 2, 360, window=cards_container, tags="cards")
 
@@ -853,7 +871,7 @@ class LauncherApp(ctk.CTk):
 
         self.bg_canvas.bind("<Configure>", _on_canvas_resize)
 
-    def create_module_card(self, parent, mod_data, habilitado, is_first=False):
+    def create_module_card(self, parent, mod_data, habilitado, is_first=False, width=195, height=220, padx=12):
         """
         Crea una tarjeta rectangular con bordes redondeados, icono superior en memoria
         y título en negrita abajo, exactamente como en el diseño de referencia.
@@ -878,18 +896,18 @@ class LauncherApp(ctk.CTk):
             hover_border = "#1b3554"
             cursor = "no"
 
-        # Frame de la tarjeta (ancho ~200, alto ~220)
+        # Frame de la tarjeta adaptativo
         card = ctk.CTkFrame(
             parent,
             fg_color=card_bg,
             border_color=card_border,
             border_width=border_width,
-            corner_radius=22,
-            width=200,
-            height=220,
+            corner_radius=20,
+            width=width,
+            height=height,
             cursor=cursor
         )
-        card.pack(side="left", padx=14, pady=10)
+        card.pack(side="left", padx=padx, pady=10)
         card.pack_propagate(False)
 
         # Cargar icono directamente desde memoria
@@ -899,24 +917,27 @@ class LauncherApp(ctk.CTk):
             pil_img = get_icon_for_module(f"{mod_name} {mod_script}", self.icons)
 
         img_widget = None
+        icon_size = (54, 54) if width < 180 else (64, 64)
+        pad_top = 22 if width < 180 else 28
         if pil_img:
             try:
-                ctk_icon = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=(64, 64))
+                ctk_icon = ctk.CTkImage(light_image=pil_img, dark_image=pil_img, size=icon_size)
                 img_widget = ctk.CTkLabel(card, text="", image=ctk_icon, cursor=cursor)
-                img_widget.pack(pady=(28, 12))
+                img_widget.pack(pady=(pad_top, 10))
             except Exception as e:
                 print(f"Error al renderizar icono: {e}")
 
         # Título en negrita centrado
+        title_font_size = 13 if width < 180 else 14
         lbl_title = ctk.CTkLabel(
             card,
             text=mod_title,
-            font=ctk.CTkFont(family="Segoe UI", size=14, weight="bold"),
+            font=ctk.CTkFont(family="Segoe UI", size=title_font_size, weight="bold"),
             text_color=text_color,
             justify="center",
             cursor=cursor
         )
-        lbl_title.pack(pady=(0, 10))
+        lbl_title.pack(pady=(0, 8))
 
         if not habilitado:
             lbl_lock = ctk.CTkLabel(
@@ -985,7 +1006,7 @@ class LauncherApp(ctk.CTk):
                     return module.create_view(self.main_container, on_back=self.show_dashboard_screen)
 
                 # 2. Clases de vista conocidas
-                for cls_name in ["PDFUnirView", "GeneDocumentosView", "FormatoVinculacionView", "PDFCompressorView", "ModuleView"]:
+                for cls_name in ["WordToPdfMergerView", "PDFUnirView", "GeneDocumentosView", "FormatoVinculacionView", "PDFCompressorView", "ModuleView"]:
                     if hasattr(module, cls_name):
                         cls = getattr(module, cls_name)
                         return cls(self.main_container, on_back=self.show_dashboard_screen)
@@ -1039,6 +1060,8 @@ class LauncherApp(ctk.CTk):
                 mw = min_size[0] if min_size else None
                 mh = min_size[1] if min_size else None
                 self.set_window_size_for_view("custom", custom_w=pref_size[0], custom_h=pref_size[1], min_w=mw, min_h=mh)
+            elif "word" in name.lower() or "pds" in name.lower():
+                self.set_window_size_for_view("custom", custom_w=1040, custom_h=700, min_w=880, min_h=580)
             elif "unir" in name.lower() or "pdf" in name.lower():
                 self.set_window_size_for_view("pdf_unir")
             elif "documento" in name.lower() or "gene" in name.lower():
