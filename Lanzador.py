@@ -240,6 +240,7 @@ class LauncherApp(ctk.CTk):
             seen_scripts[base_script] = True
             
             candidates = [
+                os.path.join(modules_dir_path, "Modulos", os.path.basename(script_raw)),
                 os.path.join(modules_dir_path, os.path.basename(script_raw)),
                 os.path.join(BASE_DIR, "Modulos", os.path.basename(script_raw)),
                 os.path.join(BASE_DIR, script_raw),
@@ -255,7 +256,12 @@ class LauncherApp(ctk.CTk):
 
         # 2. Descubrimiento automático de cualquier nuevo script en el repositorio
         CORE_FILES = {"lanzador.py", "git_updater.py", "icon_generator.py", "sheet_auth.py", "__init__.py"}
-        search_dirs = [modules_dir_path]
+        search_dirs = []
+        modulos_in_repo = os.path.join(modules_dir_path, "Modulos")
+        if os.path.isdir(modulos_in_repo):
+            search_dirs.append(modulos_in_repo)
+        if os.path.isdir(modules_dir_path) and modules_dir_path not in search_dirs:
+            search_dirs.append(modules_dir_path)
         modulos_sub = os.path.join(BASE_DIR, "Modulos")
         if os.path.isdir(modulos_sub) and modulos_sub not in search_dirs:
             search_dirs.append(modulos_sub)
@@ -855,6 +861,7 @@ class LauncherApp(ctk.CTk):
 
         candidates = [
             script_filename,
+            os.path.join(modules_dir_path, "Modulos", os.path.basename(script_filename)),
             os.path.join(modules_dir_path, os.path.basename(script_filename)),
             os.path.join(BASE_DIR, "Modulos", os.path.basename(script_filename)),
             os.path.join(BASE_DIR, script_filename),
