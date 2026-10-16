@@ -128,7 +128,8 @@ class GitUpdater:
             if not zip_content:
                 return False, "No se pudo descargar el paquete desde GitHub."
 
-            # Extraer archivos .py a modules_dir
+            # Extraer archivos al directorio correspondiente
+            target_extract = self.storage_dir if self.is_frozen else self.modules_dir
             with zipfile.ZipFile(io.BytesIO(zip_content)) as zf:
                 for member in zf.infolist():
                     filename = member.filename
@@ -137,7 +138,7 @@ class GitUpdater:
                     if len(parts) > 1 and parts[1]:
                         rel_path = parts[1]
                         if not rel_path.endswith("/"): # Es archivo
-                            dest_path = os.path.join(self.modules_dir, rel_path)
+                            dest_path = os.path.join(target_extract, rel_path)
                             os.makedirs(os.path.dirname(dest_path), exist_ok=True)
                             with zf.open(member) as source, open(dest_path, "wb") as target:
                                 shutil.copyfileobj(source, target)
@@ -224,6 +225,12 @@ class GitUpdater:
 
         # Asegurar módulos iniciales de respaldo por si no hay conexión
         self.ensure_embedded_fallback()
+
+        # En modo desarrollo dentro del propio repositorio Git, no sobreescribir ni clonar
+        if not self.is_frozen and self.is_git_repo(self.storage_dir):
+            if on_status_callback:
+                on_status_callback("Repositorio local de desarrollo activo.")
+            return False, "Modo desarrollo local activo (al día)."
 
         if self._has_git():
             # Flujo con Git
